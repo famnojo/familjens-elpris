@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Root-only variant: run this on your computer to generate a fresh data.json,
+# then upload that single file to GitHub (root). No GitHub Actions required.
 import os, json, datetime as dt, pytz
 import pandas as pd
 from nordpool import elspot
 
-BIDDING_ZONE = "SE3"  # förinställt
+BIDDING_ZONE = "SE3"
 CURRENCY = "SEK"
 TZ = pytz.timezone("Europe/Stockholm")
 HOURS_AHEAD = 36
 WINDOWS = [1,2,3]
 TOP_K = 3
-OUT_PATH = os.path.join(os.path.dirname(__file__), "..", "site", "data.json")
+OUT_PATH = os.path.join(os.path.dirname(__file__), "data.json")  # root
 
 def fetch_prices(zone: str, hours: int):
     spot = elspot.Prices()
@@ -27,7 +29,7 @@ def compute_windows(series, durations, top_k=3):
     res = {}
     vals = series.values
     for N in durations:
-        if N <= 0 or N > len(vals): 
+        if N <= 0 or N > len(vals):
             continue
         s = pd.Series(vals).rolling(N).sum().dropna().values
         order = s.argsort()[:top_k]
@@ -58,10 +60,9 @@ def main():
         "mean_ore_per_kwh": mean_val,
         "windows": compute_windows(series, WINDOWS, TOP_K)
     }
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
-    print(f"Wrote {OUT_PATH}")
+    print(f"Skrev {OUT_PATH}. Ladda upp den till GitHub-repots rot för att uppdatera sidan.")
 
 if __name__ == "__main__":
     main()
