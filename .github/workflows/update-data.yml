@@ -1,0 +1,35 @@
+name: Uppdatera elprisdata
+
+on:
+  schedule:
+    - cron: '5 12 * * *' # kör varje dag kl 12:05 svensk tid (10:05 UTC)
+  workflow_dispatch:      # möjlighet att köra manuellt via GitHub
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checka ut koden
+        uses: actions/checkout@v4
+
+      - name: Sätt upp Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Installera beroenden
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Kör scriptet för att hämta priser
+        run: python fetch_nordpool.py
+
+      - name: Ladda upp uppdaterad data.json
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add data.json
+          git commit -m "Uppdaterar elprisdata $(date '+%Y-%m-%d')"
+          git push
