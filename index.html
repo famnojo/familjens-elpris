@@ -1,76 +1,76 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="sv">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Familjens elpriser – SE3</title>
-  <link rel="stylesheet" href="./style.css" />
-  <meta name="theme-color" content="#0d9488"/>
-  <meta http-equiv="Cache-Control" content="no-store"/>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Familjens Elpris SE3</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            margin-top: 20px;
+        }
+        canvas {
+            max-width: 90%;
+            max-height: 500px; /* Begränsa höjden på grafen */
+        }
+        .info {
+            margin-top: 10px;
+            font-size: 1.2em;
+        }
+    </style>
 </head>
 <body>
-  <header>
-    <h1>Billigaste el timmarna – SE3</h1>
-    <div class="sub">Senast uppdaterad: <span id="updated"></span></div>
-  </header>
-  <main>
-    <section class="panel">
-      <h2>Timpriser (öre/kWh)</h2>
-      <canvas id="priceChart"></canvas>
-      <div class="legend"><span class="dot green"></span>Under dygnsmedel <span class="dot gray"></span>Över dygnsmedel</div>
-    </section>
-    <section class="panel">
-      <h2>Topptider för laddning & tvätt</h2>
-      <div id="windows"></div>
-    </section>
-  </main>
-  <footer>
-    <small>Data: Nord Pool • SE3 • Lokaltid: Europe/Stockholm</small>
-  </footer>
+    <h1>Elpriser för SE3</h1>
+    <p class="info">Gröna staplar = under dagens medelpris</p>
+    <canvas id="chart"></canvas>
 
-<script>
-(async function(){
-  try {
-    const res = await fetch('./data.json?ts=' + Date.now());
-    const data = await res.json();
-    document.getElementById('updated').textContent = new Date(data.generated_at).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' });
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        async function loadData() {
+            const response = await fetch('data.json');
+            const data = await response.json();
 
-    const labels = data.hours.map(h => new Date(h).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', month: '2-digit', day: '2-digit' }));
-    const values = data.prices_ore_per_kwh;
-    const mean = data.mean_ore_per_kwh;
-    const bg = values.map(v => v < mean ? 'rgba(34,197,94,0.8)' : 'rgba(148,163,184,0.8)');
+            const hours = data.hours.map(h => new Date(h).getHours() + ":00");
+            const pricesKr = data.prices_ore_per_kwh.map(p => p / 100); // omvandla till kr
+            const meanPrice = data.mean_ore_per_kwh / 100;
 
-    const ctx = document.getElementById('priceChart');
-    new Chart(ctx, {
-      type: 'bar',
-      data: { labels, datasets: [{ label: 'öre/kWh', data: values, backgroundColor: bg }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true, title: { display: true, text: 'öre/kWh' } } },
-        plugins: { legend: { display: false } }
-      }
-    });
+            const colors = pricesKr.map(p => p <= meanPrice ? 'green' : 'red');
 
-    const cont = document.getElementById('windows');
-    const durations = Object.keys(data.windows).map(Number).sort((a,b)=>a-b);
-    durations.forEach(N => {
-      const group = document.createElement('div'); group.className = 'win-group';
-      const title = document.createElement('h3'); title.textContent = `Bästa ${N}h-fönster:`; group.appendChild(title);
-      const ul = document.createElement('ul');
-      data.windows[N].forEach(item => {
-        const s = new Date(item.start).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute:'2-digit', month:'2-digit', day:'2-digit' });
-        const e = new Date(item.end).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute:'2-digit', month:'2-digit', day:'2-digit' });
-        const li = document.createElement('li');
-        li.textContent = `${s} – ${e} (~${Math.round(item.avg_ore_per_kwh)} öre/kWh)`; ul.appendChild(li);
-      });
-      group.appendChild(ul); cont.appendChild(group);
-    });
-  } catch (e) {
-    document.querySelector('main').innerHTML = '<p style="color:#ef4444">Kunde inte läsa data.json. Ladda upp en ny data.json enligt README."</p>';
-    console.error(e);
-  }
-})();
-</script>
+            const ctx = document.getElementById('chart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: hours,
+                    datasets: [{
+                        label: 'kr/kWh',
+                        data: pricesKr,
+                        backgroundColor: colors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toFixed(2) + ' kr';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        loadData();
+    </script>
 </body>
 </html>
