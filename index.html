@@ -3,17 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Elpriser SE3 – Topp 5 & under medel</title>
+  <title>Elpriser SE3 – under medel (med staplar)</title>
+  <link rel="stylesheet" href="./style.css?v=3" />
   <style>
-    :root{ --bg:#0b132b; --fg:#e5e7eb; --card:#111827; --muted:#94a3b8; --accent:#22c55e; }
+    :root{ --bg:#0b132b; --fg:#e5e7eb; --card:#111827; --muted:#94a3b8; --accent:#22c55e; --cheapest:#f59e0b; }
     *{ box-sizing:border-box; }
     body{ margin:0; font-family: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial; background:var(--bg); color:var(--fg); }
     header{ padding:16px 20px; border-bottom:1px solid #1f2937; }
     h1{ margin:0; font-size:20px; }
     .sub{ color:var(--muted); margin-top:4px; font-size:14px; }
-    main{ max-width:820px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+    main{ max-width:980px; margin:0 auto; padding:16px; display:grid; gap:16px; }
     .card{ background:var(--card); border:1px solid #1f2937; border-radius:12px; padding:16px; }
     h2{ margin:0 0 10px; font-size:18px; }
+    /* Diagramyta */
+    #underChartWrap{ height: 380px; }
+    @media (min-width:900px){ #underChartWrap{ height: 460px; } }
+    /* Listor */
     .grid{ display:flex; flex-direction:column; gap:8px; }
     .row{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid #1f2937; border-radius:10px; }
     .row .time{ font-variant-numeric: tabular-nums; }
@@ -22,22 +27,37 @@
     .bold{ font-weight:700; }
     footer{ text-align:center; color:var(--muted); padding:10px 16px; font-size:13px; }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>Elpriser SE3</h1>
-    <div class="sub">Senast uppdaterad: <span id="updated">…</span></div>
+    <h1>Elpriser SE3 – timmar under dagens medel</h1>
+    <div class="sub">
+      Dagens snitt: <span id="mean">…</span> •
+      Billigaste timmen: <span id="cheapestLabel">…</span> •
+      Senast uppdaterad: <span id="updated">…</span>
+    </div>
   </header>
 
   <main>
     <section class="card">
-      <h2>Topp 5 billigaste timmarna</h2>
+      <h2>Staplar (bara under medel, i tidsordning)</h2>
+      <div id="underChartWrap">
+        <canvas id="underChart"></canvas>
+      </div>
+      <div class="muted" style="margin-top:8px">
+        Grön stapel = under medel • Gul = allra billigast timme
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Topp 5 billigaste timmar</h2>
       <div id="top5" class="grid"></div>
       <div id="top5empty" class="muted" style="display:none">Inga data just nu.</div>
     </section>
 
     <section class="card">
-      <h2>Alla timmar under medel (billigast → dyrast)</h2>
+      <h2>Alla timmar under medel (tidslinje)</h2>
       <div id="underMean" class="grid"></div>
       <div id="underEmpty" class="muted" style="display:none">Inga timmar under medel hittades.</div>
     </section>
@@ -53,35 +73,11 @@
     const res = await fetch('./data.json?ts='+Date.now());
     const data = await res.json();
 
+    // Hjälpfunktioner
     const fmtUpdated = (iso) =>
       new Date(iso).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' });
-
-    // Visa "senast uppdaterad"
-    if (data.generated_at) {
-      document.getElementById('updated').textContent = fmtUpdated(data.generated_at);
-    }
-
-    // Bygg {time, price} från data.json
-    const items = (data.hours || []).map((h, i) => ({
-      timeISO: h,
-      price: (data.prices_ore_per_kwh || [])[i]
-    })).filter(x => typeof x.price === 'number' && !Number.isNaN(x.price));
-
-    // Medelpris (om inte finns i JSON, räkna)
-    const mean = typeof data.mean_ore_per_kwh === 'number'
-      ? data.mean_ore_per_kwh
-      : (items.length ? items.reduce((a,b)=>a+b.price,0)/items.length : 0);
-
-    // Under medel
-    const under = items.filter(x => x.price < mean);
-
-    // Topp 5 (bland under medel), sorterat billigast→dyrast
-    const top5 = under.slice().sort((a,b)=>a.price - b.price).slice(0,5);
-
-    // Hjälpare: format
     const fmtTime = (iso) => {
       const d = new Date(iso);
-      // t.ex. "fre 15/08 14:00"
       return d.toLocaleString('sv-SE', {
         timeZone: 'Europe/Stockholm',
         weekday: 'short', day: '2-digit', month: '2-digit',
@@ -90,29 +86,92 @@
     };
     const fmtOre = (v) => `${Math.round(v)} öre`;
 
-    // Render-funktion
-    const renderRows = (arr, elId, emptyId, topSet = null) => {
-      const el = document.getElementById(elId);
-      if (!arr.length){ document.getElementById(emptyId).style.display='block'; return; }
-      arr.forEach(x=>{
-        const row = document.createElement('div');
-        row.className = 'row';
-        const isTop = topSet && topSet.has(x.timeISO);
-        row.innerHTML = `
-          <div class="time ${isTop ? 'bold' : ''}">${fmtTime(x.timeISO)}</div>
-          <div class="price">${fmtOre(x.price)}</div>
-        `;
-        el.appendChild(row);
-      });
-    };
+    // Visa metadata
+    if (data.generated_at) document.getElementById('updated').textContent = fmtUpdated(data.generated_at);
 
-    // Render Topp 5
-    renderRows(top5, 'top5', 'top5empty');
+    // Bygg items {timeISO, price}
+    const items = (data.hours || []).map((h, i) => ({
+      timeISO: h,
+      price: (data.prices_ore_per_kwh || [])[i]
+    })).filter(x => typeof x.price === 'number' && !Number.isNaN(x.price));
 
-    // Alla under medel, sorterade billigast→dyrast
-    const underSorted = under.slice().sort((a,b)=>a.price - b.price);
-    const topSet = new Set(top5.map(x=>x.timeISO));
-    renderRows(underSorted, 'underMean', 'underEmpty', topSet);
+    // Medel
+    const mean = typeof data.mean_ore_per_kwh === 'number'
+      ? data.mean_ore_per_kwh
+      : (items.length ? items.reduce((a,b)=>a+b.price,0)/items.length : 0);
+    document.getElementById('mean').textContent = fmtOre(mean);
+
+    // Filtrera timmar under medel & sortera i tidsordning
+    const under = items.filter(x => x.price < mean)
+                       .sort((a,b)=> new Date(a.timeISO) - new Date(b.timeISO));
+
+    if (!under.length){
+      document.getElementById('underEmpty').style.display='block';
+      document.getElementById('top5empty').style.display='block';
+      document.getElementById('cheapestLabel').textContent = '–';
+      // Visa ändå tomt diagram
+    }
+
+    // Hitta billigaste timmen
+    const cheapest = under.length ? under.reduce((m,x)=> x.price < m.price ? x : m, under[0]) : null;
+    if (cheapest){
+      document.getElementById('cheapestLabel').textContent = `${fmtTime(cheapest.timeISO)} (${fmtOre(cheapest.price)})`;
+    }
+
+    // Bygg stapeldiagram för endast under-medel, i tidsordning
+    const labels = under.map(x => {
+      const d = new Date(x.timeISO);
+      return d.toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', weekday:'short', hour:'2-digit' }).replace(':00','');
+    });
+    const values = under.map(x => x.price);
+
+    // Färger: billigaste = gul, övriga = gröna
+    const bg = under.map(x => x.timeISO === (cheapest && cheapest.timeISO) ? 'rgba(245,158,11,0.9)' : 'rgba(34,197,94,0.85)');
+
+    // Rimlig y-skala: mjukt tak kring (max_under * 1.25), min 80 öre
+    const maxUnder = values.length ? Math.max(...values) : 0;
+    const suggestedMax = Math.max(80, Math.round(maxUnder * 1.25));
+
+    const ctx = document.getElementById('underChart');
+    new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'öre/kWh', data: values, backgroundColor: bg }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            suggestedMax,
+            title: { display: true, text: 'öre/kWh' },
+            ticks: { precision: 0 }
+          }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    // Topp 5 billigaste (bland under-medel), men *bara som lista*
+    const top5 = under.slice().sort((a,b)=>a.price - b.price).slice(0,5);
+    const top5El = document.getElementById('top5');
+    if (!top5.length) document.getElementById('top5empty').style.display='block';
+    top5.forEach(x=>{
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<div class="time ${x.timeISO===cheapest?.timeISO?'bold':''}">${fmtTime(x.timeISO)}</div>
+                       <div class="price">${fmtOre(x.price)}</div>`;
+      top5El.appendChild(row);
+    });
+
+    // Alla under medel i tidslinje (kronologiskt)
+    const underEl = document.getElementById('underMean');
+    if (!under.length) document.getElementById('underEmpty').style.display='block';
+    under.forEach(x=>{
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<div class="time ${x.timeISO===cheapest?.timeISO?'bold':''}">${fmtTime(x.timeISO)}</div>
+                       <div class="price">${fmtOre(x.price)}</div>`;
+      underEl.appendChild(row);
+    });
 
   }catch(e){
     document.querySelector('main').innerHTML =
