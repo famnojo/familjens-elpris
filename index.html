@@ -3,8 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Elpriser SE3 – under medel (med staplar)</title>
-  <link rel="stylesheet" href="./style.css?v=3" />
+  <title>Elpriser SE3 – Idag & Imorgon</title>
   <style>
     :root{ --bg:#0b132b; --fg:#e5e7eb; --card:#111827; --muted:#94a3b8; --accent:#22c55e; --cheapest:#f59e0b; }
     *{ box-sizing:border-box; }
@@ -12,15 +11,19 @@
     header{ padding:16px 20px; border-bottom:1px solid #1f2937; }
     h1{ margin:0; font-size:20px; }
     .sub{ color:var(--muted); margin-top:4px; font-size:14px; }
-    main{ max-width:980px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+    main{ max-width:1200px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+    .cols{ display:grid; gap:16px; grid-template-columns: 1fr; }
+    @media(min-width:980px){ .cols{ grid-template-columns: 1fr 1fr; } }
     .card{ background:var(--card); border:1px solid #1f2937; border-radius:12px; padding:16px; }
     h2{ margin:0 0 10px; font-size:18px; }
+    .meta{ color:var(--muted); font-size:14px; margin-bottom:8px; }
     /* Diagramyta */
-    #underChartWrap{ height: 380px; }
-    @media (min-width:900px){ #underChartWrap{ height: 460px; } }
+    .chartWrap{ height: 320px; }
+    @media (min-width:900px){ .chartWrap{ height: 380px; } }
+    .legend{ color:var(--muted); font-size:13px; margin-top:6px; }
     /* Listor */
     .grid{ display:flex; flex-direction:column; gap:8px; }
-    .row{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid #1f2937; border-radius:10px; }
+    .row{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border:1px solid #1f2937; border-radius:10px; }
     .row .time{ font-variant-numeric: tabular-nums; }
     .row .price{ color:var(--accent); font-weight:600; font-variant-numeric: tabular-nums; }
     .muted{ color:var(--muted); }
@@ -31,40 +34,44 @@
 </head>
 <body>
   <header>
-    <h1>Elpriser SE3 – timmar under dagens medel</h1>
+    <h1>Elpriser SE3 – Idag & Imorgon</h1>
     <div class="sub">
-      Dagens snitt: <span id="mean">…</span> •
-      Billigaste timmen: <span id="cheapestLabel">…</span> •
       Senast uppdaterad: <span id="updated">…</span>
     </div>
   </header>
 
   <main>
-    <section class="card">
-      <h2>Staplar (bara under medel, i tidsordning)</h2>
-      <div id="underChartWrap">
-        <canvas id="underChart"></canvas>
-      </div>
-      <div class="muted" style="margin-top:8px">
-        Grön stapel = under medel • Gul = allra billigast timme
-      </div>
-    </section>
+    <div class="cols">
+      <!-- IDAG -->
+      <section class="card" id="todaySec">
+        <h2>Idag</h2>
+        <div class="meta">
+          Datum: <span id="todayDate">–</span> • Dagens snitt: <span id="todayMean">–</span> • Billigaste timmen: <span id="todayCheapest">–</span>
+        </div>
+        <div class="chartWrap"><canvas id="todayChart"></canvas></div>
+        <div class="legend">Grön stapel = under medel • Gul = allra billigast timme</div>
+        <h3 style="margin-top:14px">Alla timmar under medel (tidslinje)</h3>
+        <div id="todayUnder" class="grid"></div>
+        <div id="todayEmpty" class="muted" style="display:none">Inga timmar under medel kvar idag.</div>
+      </section>
 
-    <section class="card">
-      <h2>Topp 5 billigaste timmar</h2>
-      <div id="top5" class="grid"></div>
-      <div id="top5empty" class="muted" style="display:none">Inga data just nu.</div>
-    </section>
-
-    <section class="card">
-      <h2>Alla timmar under medel (tidslinje)</h2>
-      <div id="underMean" class="grid"></div>
-      <div id="underEmpty" class="muted" style="display:none">Inga timmar under medel hittades.</div>
-    </section>
+      <!-- IMORGON -->
+      <section class="card" id="tomorrowSec">
+        <h2>Imorgon</h2>
+        <div class="meta">
+          Datum: <span id="tomorrowDate">–</span> • Dygnssnitt: <span id="tomorrowMean">–</span> • Billigaste timmen: <span id="tomorrowCheapest">–</span>
+        </div>
+        <div class="chartWrap"><canvas id="tomorrowChart"></canvas></div>
+        <div class="legend">Grön stapel = under medel • Gul = allra billigast timme</div>
+        <h3 style="margin-top:14px">Alla timmar under medel (tidslinje)</h3>
+        <div id="tomorrowUnder" class="grid"></div>
+        <div id="tomorrowEmpty" class="muted" style="display:none">Imorgon är inte publicerad än.</div>
+      </section>
+    </div>
   </main>
 
   <footer>
-    Data från <code>data.json</code> • Priser i öre/kWh
+    Data från <code>data.json</code> • Priser i öre/kWh • Idag visar kvarvarande timmar, Imorgon visar hela dygnet
   </footer>
 
 <script>
@@ -72,106 +79,79 @@
   try{
     const res = await fetch('./data.json?ts='+Date.now());
     const data = await res.json();
-
-    // Hjälpfunktioner
-    const fmtUpdated = (iso) =>
-      new Date(iso).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' });
-    const fmtTime = (iso) => {
-      const d = new Date(iso);
-      return d.toLocaleString('sv-SE', {
-        timeZone: 'Europe/Stockholm',
-        weekday: 'short', day: '2-digit', month: '2-digit',
-        hour: '2-digit', minute: '2-digit'
-      });
-    };
+    const fmtUpdated = (iso) => new Date(iso).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' });
+    const fmtTime = (iso) => new Date(iso).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', weekday:'short', hour:'2-digit', minute:'2-digit', month:'2-digit', day:'2-digit' });
     const fmtOre = (v) => `${Math.round(v)} öre`;
 
-    // Visa metadata
     if (data.generated_at) document.getElementById('updated').textContent = fmtUpdated(data.generated_at);
 
-    // Bygg items {timeISO, price}
-    const items = (data.hours || []).map((h, i) => ({
-      timeISO: h,
-      price: (data.prices_ore_per_kwh || [])[i]
-    })).filter(x => typeof x.price === 'number' && !Number.isNaN(x.price));
+    function renderDay(sectPrefix, payload){
+      const dateEl = document.getElementById(sectPrefix+'Date');
+      const meanEl = document.getElementById(sectPrefix+'Mean');
+      const cheapestEl = document.getElementById(sectPrefix+'Cheapest');
+      const underEl = document.getElementById(sectPrefix+'Under');
+      const emptyEl = document.getElementById(sectPrefix+'Empty');
+      const chartId = sectPrefix+'Chart';
 
-    // Medel
-    const mean = typeof data.mean_ore_per_kwh === 'number'
-      ? data.mean_ore_per_kwh
-      : (items.length ? items.reduce((a,b)=>a+b.price,0)/items.length : 0);
-    document.getElementById('mean').textContent = fmtOre(mean);
+      const hours = payload.hours || [];
+      const prices = payload.prices_ore_per_kwh || [];
+      const mean = typeof payload.mean_ore_per_kwh === 'number' ? payload.mean_ore_per_kwh : 0;
 
-    // Filtrera timmar under medel & sortera i tidsordning
-    const under = items.filter(x => x.price < mean)
-                       .sort((a,b)=> new Date(a.timeISO) - new Date(b.timeISO));
+      dateEl.textContent = payload.date || '–';
+      meanEl.textContent = mean ? fmtOre(mean) : '–';
 
-    if (!under.length){
-      document.getElementById('underEmpty').style.display='block';
-      document.getElementById('top5empty').style.display='block';
-      document.getElementById('cheapestLabel').textContent = '–';
-      // Visa ändå tomt diagram
-    }
+      // under medel i tidsordning
+      const items = hours.map((h,i)=>({ timeISO:h, price:prices[i] }))
+        .filter(x=> typeof x.price === 'number' && !Number.isNaN(x.price))
+        .sort((a,b)=> new Date(a.timeISO) - new Date(b.timeISO));
+      const under = items.filter(x => x.price < mean);
 
-    // Hitta billigaste timmen
-    const cheapest = under.length ? under.reduce((m,x)=> x.price < m.price ? x : m, under[0]) : null;
-    if (cheapest){
-      document.getElementById('cheapestLabel').textContent = `${fmtTime(cheapest.timeISO)} (${fmtOre(cheapest.price)})`;
-    }
+      if (!under.length){
+        emptyEl.style.display = 'block';
+        cheapestEl.textContent = '–';
+      } else {
+        const cheapest = under.reduce((m,x)=> x.price < m.price ? x : m, under[0]);
+        cheapestEl.textContent = `${fmtTime(cheapest.timeISO)} (${fmtOre(cheapest.price)})`;
 
-    // Bygg stapeldiagram för endast under-medel, i tidsordning
-    const labels = under.map(x => {
-      const d = new Date(x.timeISO);
-      return d.toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', weekday:'short', hour:'2-digit' }).replace(':00','');
-    });
-    const values = under.map(x => x.price);
+        // Staplar
+        const labels = under.map(x => new Date(x.timeISO).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', weekday:'short', hour:'2-digit' }).replace(':00',''));
+        const values = under.map(x => x.price);
+        const bg = under.map(x => x.timeISO === cheapest.timeISO ? 'rgba(245,158,11,0.9)' : 'rgba(34,197,94,0.85)');
+        const maxUnder = values.length ? Math.max(...values) : 0;
+        const suggestedMax = Math.max(80, Math.round(maxUnder * 1.25));
 
-    // Färger: billigaste = gul, övriga = gröna
-    const bg = under.map(x => x.timeISO === (cheapest && cheapest.timeISO) ? 'rgba(245,158,11,0.9)' : 'rgba(34,197,94,0.85)');
-
-    // Rimlig y-skala: mjukt tak kring (max_under * 1.25), min 80 öre
-    const maxUnder = values.length ? Math.max(...values) : 0;
-    const suggestedMax = Math.max(80, Math.round(maxUnder * 1.25));
-
-    const ctx = document.getElementById('underChart');
-    new Chart(ctx, {
-      type: 'bar',
-      data: { labels, datasets: [{ label: 'öre/kWh', data: values, backgroundColor: bg }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          y: {
-            beginAtZero: true,
-            suggestedMax,
-            title: { display: true, text: 'öre/kWh' },
-            ticks: { precision: 0 }
+        new Chart(document.getElementById(chartId), {
+          type: 'bar',
+          data: { labels, datasets: [{ label: 'öre/kWh', data: values, backgroundColor: bg }] },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true, suggestedMax, title:{ display:true, text:'öre/kWh' }, ticks:{ precision:0 } }
+            },
+            plugins: { legend:{ display:false } }
           }
-        },
-        plugins: { legend: { display: false } }
+        });
+
+        // Lista
+        under.forEach(x=>{
+          const row = document.createElement('div');
+          row.className = 'row';
+          const bold = (x.timeISO===cheapest.timeISO) ? 'bold' : '';
+          row.innerHTML = `<div class="time ${bold}">${fmtTime(x.timeISO)}</div>
+                           <div class="price">${fmtOre(x.price)}</div>`;
+          underEl.appendChild(row);
+        });
       }
-    });
+    }
 
-    // Topp 5 billigaste (bland under-medel), men *bara som lista*
-    const top5 = under.slice().sort((a,b)=>a.price - b.price).slice(0,5);
-    const top5El = document.getElementById('top5');
-    if (!top5.length) document.getElementById('top5empty').style.display='block';
-    top5.forEach(x=>{
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `<div class="time ${x.timeISO===cheapest?.timeISO?'bold':''}">${fmtTime(x.timeISO)}</div>
-                       <div class="price">${fmtOre(x.price)}</div>`;
-      top5El.appendChild(row);
-    });
+    // Rendera IDAG och IMORGON
+    renderDay('today', data.today || {});
+    renderDay('tomorrow', data.tomorrow || {});
 
-    // Alla under medel i tidslinje (kronologiskt)
-    const underEl = document.getElementById('underMean');
-    if (!under.length) document.getElementById('underEmpty').style.display='block';
-    under.forEach(x=>{
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `<div class="time ${x.timeISO===cheapest?.timeISO?'bold':''}">${fmtTime(x.timeISO)}</div>
-                       <div class="price">${fmtOre(x.price)}</div>`;
-      underEl.appendChild(row);
-    });
+    // Om imorgon saknas (inte publicerat än), visa info
+    if (!data.tomorrow || !(data.tomorrow.hours||[]).length){
+      document.getElementById('tomorrowEmpty').style.display='block';
+    }
 
   }catch(e){
     document.querySelector('main').innerHTML =
