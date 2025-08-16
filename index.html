@@ -1,67 +1,180 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="sv">
 <head>
-  <meta charset="UTF-8">
-  <title>Familjens Elpris</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Familjens Elpris – Idag & Imorgon (SE3)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    canvas { max-width: 900px; margin: 30px auto; display: block; }
+    :root{
+      --bg:#0b132b; --fg:#e5e7eb; --panel:#111827; --muted:#9ca3af;
+      --ok:#22c55e; --bad:#ef4444; --mean:#60a5fa;
+      --wrapH: 420px;           /* mobilhöjd */
+      --wrapH-lg: 520px;        /* desktophöjd */
+      --maxW: 980px;
+    }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial;
+          background:var(--bg); color:var(--fg); }
+    header{ padding:16px 20px; border-bottom:1px solid #1f2937; }
+    h1{ margin:0; font-size:20px; }
+    .sub{ color:var(--muted); margin-top:4px; font-size:14px; }
+    main{ max-width:var(--maxW); margin:0 auto; padding:16px; display:grid; gap:16px; }
+    .card{ background:var(--panel); border:1px solid #1f2937; border-radius:14px; padding:16px; }
+    h2{ margin:0 0 8px; font-size:18px; }
+    .meta{ color:var(--muted); font-size:14px; margin-bottom:8px; }
+    .legend{ color:var(--muted); font-size:13px; margin-top:6px; }
+    .chartwrap{ height: var(--wrapH); }
+    @media (min-width:900px){ .chartwrap{ height: var(--wrapH-lg); } }
+    footer{ text-align:center; color:var(--muted); padding:12px; font-size:13px; }
+    .msg{ color:var(--muted); }
   </style>
 </head>
 <body>
-  <h1>Elpriser SE3</h1>
-  <p id="meta"></p>
-  <canvas id="chart"></canvas>
+  <header>
+    <h1>Elpriser SE3 – Idag & Imorgon</h1>
+    <div class="sub">Senast uppdaterad: <span id="updated">–</span></div>
+  </header>
 
-  <script>
-    async function loadData() {
-      try {
-        const response = await fetch("data.json");
-        if (!response.ok) throw new Error("Kunde inte läsa data.json");
-        const data = await response.json();
+  <main>
+    <!-- IDAG -->
+    <section class="card">
+      <h2>Idag</h2>
+      <div class="meta">
+        Dagens snitt: <span id="todayMean">–</span>
+      </div>
+      <div class="chartwrap"><canvas id="todayChart"></canvas></div>
+      <div class="legend">Grönt = under snitt • Rött = över snitt • Blå linje = snitt</div>
+    </section>
 
-        const hours = data.hours.map(h => new Date(h).getHours() + ":00");
-        const prices = data.prices_ore_per_kwh;
-        const mean = data.mean_ore_per_kwh;
+    <!-- IMORGON -->
+    <section class="card">
+      <h2>Imorgon</h2>
+      <div class="meta">
+        Dygnssnitt: <span id="tomorrowMean">–</span>
+      </div>
+      <div class="chartwrap"><canvas id="tomorrowChart"></canvas></div>
+      <div class="legend">Grönt = under snitt • Rött = över snitt • Blå linje = snitt</div>
+      <div id="tomorrowEmpty" class="msg" style="display:none; margin-top:8px;">
+        Inga priser publicerade ännu för imorgon.
+      </div>
+    </section>
+  </main>
 
-        document.getElementById("meta").textContent =
-          `Senaste uppdatering: ${data.generated_at} | Antal timmar: ${hours.length}`;
+  <footer>
+    Data från <code>data.json</code> • Priser i öre/kWh • Tider visas i Europe/Stockholm
+  </footer>
 
-        const colors = prices.map(p => p < mean ? "green" : "red");
+<script>
+(async function(){
+  try{
+    const res = await fetch('./data.json?ts='+Date.now(), {cache: 'no-store'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
 
-        new Chart(document.getElementById("chart"), {
-          type: "bar",
-          data: {
-            labels: hours,
-            datasets: [{
-              label: "Öre/kWh",
-              data: prices,
-              backgroundColor: colors
-            }, {
-              label: "Dagens snitt",
-              data: Array(prices.length).fill(mean),
-              type: "line",
-              borderColor: "blue",
-              borderWidth: 2,
-              fill: false,
-              pointRadius: 0
-            }]
-          },
-          options: {
-            scales: {
-              y: { beginAtZero: true, title: { display: true, text: "Öre/kWh" } },
-              x: { title: { display: true, text: "Timme" } }
-            }
-          }
-        });
+    const tz = 'Europe/Stockholm';
+    const fmtTime = iso => {
+      const d = new Date(iso);
+      // ex: "lör 14:00"
+      return d.toLocaleString('sv-SE', { timeZone: tz, weekday:'short', hour:'2-digit' }).replace(':00','');
+    };
+    const fmtOre = v => `${Math.round(v)} öre`;
 
-      } catch (e) {
-        document.body.innerHTML = `<p style="color:red">Fel: ${e.message}</p>`;
-      }
+    if (data.generated_at) {
+      document.getElementById('updated').textContent =
+        new Date(data.generated_at).toLocaleString('sv-SE', { timeZone: tz });
     }
 
-    loadData();
-  </script>
+    // ---- Idag (dagens data ligger i roten enligt din JSON) ----
+    const todayHoursISO = Array.isArray(data.hours) ? data.hours : [];
+    const todayPrices = Array.isArray(data.prices_ore_per_kwh) ? data.prices_ore_per_kwh : [];
+    const todayMean = typeof data.mean_ore_per_kwh === 'number' ? data.mean_ore_per_kwh : 0;
+
+    document.getElementById('todayMean').textContent = todayMean ? fmtOre(todayMean) : '–';
+
+    renderBarChart({
+      canvasId: 'todayChart',
+      hoursISO: todayHoursISO,
+      prices: todayPrices,
+      mean: todayMean
+    });
+
+    // ---- Imorgon (om finns) ----
+    const t = data.tomorrow || {};
+    const tomHoursISO = Array.isArray(t.hours) ? t.hours : [];
+    const tomPrices = Array.isArray(t.prices_ore_per_kwh) ? t.prices_ore_per_kwh : [];
+    let tomMean = typeof t.mean_ore_per_kwh === 'number' ? t.mean_ore_per_kwh : 0;
+    if (!tomMean && tomPrices.length) {
+      tomMean = tomPrices.reduce((a,b)=>a+b,0)/tomPrices.length;
+    }
+
+    if (tomHoursISO.length && tomPrices.length) {
+      document.getElementById('tomorrowMean').textContent = fmtOre(tomMean);
+      renderBarChart({
+        canvasId: 'tomorrowChart',
+        hoursISO: tomHoursISO,
+        prices: tomPrices,
+        mean: tomMean
+      });
+    } else {
+      document.getElementById('tomorrowEmpty').style.display = 'block';
+    }
+
+    // ---- Hjälpfunktion för att rita diagrammet ----
+    function renderBarChart({canvasId, hoursISO, prices, mean}){
+      const labels = hoursISO.map(fmtTime);
+      const colors = prices.map(p => p < mean ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)'); // grön/röd
+      const maxVal = prices.length ? Math.max(...prices) : 0;
+      const suggestedMax = Math.max(80, Math.round((maxVal || mean) * 1.25));
+
+      new Chart(document.getElementById(canvasId), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'öre/kWh',
+              data: prices,
+              backgroundColor: colors
+            },
+            {
+              label: 'Snitt',
+              data: new Array(prices.length).fill(mean),
+              type: 'line',
+              borderColor: 'rgba(96,165,250,1)',
+              borderWidth: 2,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              suggestedMax,
+              title: { display: true, text: 'öre/kWh', color: '#e5e7eb' },
+              ticks: { color:'#e5e7eb', precision:0 }
+            },
+            x: {
+              ticks: { color:'#e5e7eb' }
+            }
+          },
+          plugins: {
+            legend: { labels: { color:'#e5e7eb' } }
+          }
+        }
+      });
+    }
+
+  }catch(e){
+    document.querySelector('main').innerHTML =
+      `<section class="card"><p style="color:#ef4444">Kunde inte läsa data.json (${String(e)}).</p>
+        <p class="msg">Öppna gärna <code>/data.json</code> direkt i webbläsaren för att verifiera att filen ligger i samma mapp som index.html.</p>
+      </section>`;
+    console.error(e);
+  }
+})();
+</script>
 </body>
 </html>
