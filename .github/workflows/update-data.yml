@@ -1,32 +1,36 @@
-name: Uppdatera elpriser
+name: Uppdatera elpriser (idag + imorgon)
 
 on:
   schedule:
-    - cron: "30 12 * * *"   # 12:30 UTC = 14:30 svensk tid
-  workflow_dispatch:        # så du kan köra manuellt också
+    - cron: "30 12 * * *"   # 12:30 UTC = 14:30 svensk tid (sommartid), 13:30 vintertid
+  workflow_dispatch:        # tillåt manuell körning
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checka ut repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Installera Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
       - name: Installera beroenden
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests; fi
 
-      - name: Kör script för att hämta priser
+      - name: Kör scriptet
         run: python fetch_nordpool.py
 
-      - name: Commit & push uppdaterad data.json
+      - name: Commit & push data.json
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data.json
-          git commit -m "Automatisk uppdatering av elpriser $(date)"
+          git commit -m "Auto: uppdaterar elpriser ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "Inga ändringar"
           git push
