@@ -17,6 +17,7 @@
       width: 95%;
       max-width: 800px;
       margin: 20px auto;
+      height: 400px;
     }
     canvas {
       background-color: #1e1e1e;
@@ -55,6 +56,115 @@
     <canvas id="chartTomorrow"></canvas>
   </div>
 
-  <script src="script.js"></script>
+  <script>
+    async function loadData() {
+      try {
+        const response = await fetch("data.json");
+        if (!response.ok) throw new Error("Kunde inte läsa data.json.");
+        return await response.json();
+      } catch (err) {
+        document.body.innerHTML = "<p style='color:red'>" + err.message + "</p>";
+      }
+    }
+
+    function formatHour(isoTime) {
+      return new Date(isoTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function findBestWindow(hours, prices, windowSize) {
+      let bestStart = 0;
+      let bestAvg = Infinity;
+
+      for (let i = 0; i <= prices.length - windowSize; i++) {
+        const windowPrices = prices.slice(i, i + windowSize);
+        const avg = windowPrices.reduce((a, b) => a + b, 0) / windowPrices.length;
+        if (avg < bestAvg) {
+          bestAvg = avg;
+          bestStart = i;
+        }
+      }
+      const start = formatHour(hours[bestStart]);
+      const end = formatHour(hours[bestStart + windowSize - 1]);
+      return `${start} – ${end} (snitt: ${bestAvg.toFixed(2)} öre/kWh)`;
+    }
+
+    function renderChart(ctxId, hours, prices, mean) {
+      const ctx = document.getElementById(ctxId).getContext("2d");
+      const colors = prices.map(p => (p <= mean ? "green" : "red"));
+      const labels = hours.map(h => formatHour(h));
+
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "öre/kWh",
+              data: prices,
+              backgroundColor: colors
+            },
+            {
+              label: "Dagens snitt",
+              data: Array(prices.length).fill(mean),
+              type: "line",
+              borderColor: "yellow",
+              borderWidth: 2,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              suggestedMax: Math.max(...prices) + 5,
+              ticks: { color: "#f0f0f0" }
+            },
+            x: {
+              ticks: { color: "#f0f0f0" }
+            }
+          },
+          plugins: {
+            legend: { labels: { color: "#f0f0f0" } }
+          }
+        }
+      });
+    }
+
+    async function main() {
+      const data = await loadData();
+      if (!data) return;
+
+      document.getElementById("updated").textContent =
+        "Senaste uppdatering: " + data.generated_at;
+
+      // Idag
+      const todayHours = data.hours;
+      const todayPrices = data.prices_ore_per_kwh;
+      const todayMean = data.mean_ore_per_kwh;
+
+      const bestToday = findBestWindow(todayHours, todayPrices, 5);
+      document.getElementById("best-today").textContent = bestToday;
+      renderChart("chartToday", todayHours, todayPrices, todayMean);
+
+      // Imorgon (om finns)
+      if (data.tomorrow_hours && data.tomorrow_prices) {
+        const tomorrowHours = data.tomorrow_hours;
+        const tomorrowPrices = data.tomorrow_prices;
+        const tomorrowMean = data.tomorrow_mean;
+
+        const bestTomorrow = findBestWindow(tomorrowHours, tomorrowPrices, 5);
+        document.getElementById("best-tomorrow").textContent = bestTomorrow;
+        renderChart("chartTomorrow", tomorrowHours, tomorrowPrices, tomorrowMean);
+      } else {
+        document.getElementById("best-tomorrow").textContent =
+          "Inga priser publicerade än.";
+      }
+    }
+
+    main();
+  </script>
 </body>
 </html>
