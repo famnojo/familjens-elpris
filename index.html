@@ -2,85 +2,63 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Elpriser SE3</title>
+  <title>Familjens Elpris</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
-    canvas { max-width: 900px; margin: 40px auto; display: block; }
-    h2 { margin-top: 50px; }
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    canvas { max-width: 900px; margin: 30px auto; display: block; }
   </style>
 </head>
 <body>
   <h1>Elpriser SE3</h1>
-  <p id="lastUpdate"></p>
-
-  <h2>Dagens priser</h2>
-  <canvas id="chartToday"></canvas>
-
-  <h2>Morgondagens priser</h2>
-  <canvas id="chartTomorrow"></canvas>
+  <p id="meta"></p>
+  <canvas id="chart"></canvas>
 
   <script>
     async function loadData() {
       try {
         const response = await fetch("data.json");
-        if (!response.ok) throw new Error("Misslyckades att läsa data.json");
+        if (!response.ok) throw new Error("Kunde inte läsa data.json");
         const data = await response.json();
 
-        document.getElementById("lastUpdate").textContent =
-          `Senaste uppdatering: ${data.generated_at}`;
+        const hours = data.hours.map(h => new Date(h).getHours() + ":00");
+        const prices = data.prices_ore_per_kwh;
+        const mean = data.mean_ore_per_kwh;
 
-        renderChart("chartToday", data.today, "Dagens priser");
-        if (data.tomorrow && data.tomorrow.hours && data.tomorrow.hours.length > 0) {
-          renderChart("chartTomorrow", data.tomorrow, "Morgondagens priser");
-        } else {
-          document.getElementById("chartTomorrow").replaceWith("Inga priser publicerade än.");
-        }
-      } catch (err) {
-        document.getElementById("lastUpdate").textContent = "Kunde inte läsa data.json.";
-      }
-    }
+        document.getElementById("meta").textContent =
+          `Senaste uppdatering: ${data.generated_at} | Antal timmar: ${hours.length}`;
 
-    function renderChart(canvasId, dataset, label) {
-      const hours = dataset.hours.map(h => new Date(h).getHours() + ":00");
-      const prices = dataset.prices_ore_per_kwh;
-      const avg = dataset.mean_ore_per_kwh;
+        const colors = prices.map(p => p < mean ? "green" : "red");
 
-      const colors = prices.map(p => p <= avg ? "green" : "red");
-
-      const ctx = document.getElementById(canvasId).getContext("2d");
-      new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: hours,
-          datasets: [
-            {
-              label: "Pris (öre/kWh)",
+        new Chart(document.getElementById("chart"), {
+          type: "bar",
+          data: {
+            labels: hours,
+            datasets: [{
+              label: "Öre/kWh",
               data: prices,
               backgroundColor: colors
-            },
-            {
-              label: "Snitt",
-              data: new Array(prices.length).fill(avg),
+            }, {
+              label: "Dagens snitt",
+              data: Array(prices.length).fill(mean),
               type: "line",
               borderColor: "blue",
               borderWidth: 2,
-              pointRadius: 0,
-              fill: false
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { display: true }
+              fill: false,
+              pointRadius: 0
+            }]
           },
-          scales: {
-            y: { beginAtZero: true, title: { display: true, text: "öre/kWh" } },
-            x: { title: { display: true, text: "Timme" } }
+          options: {
+            scales: {
+              y: { beginAtZero: true, title: { display: true, text: "Öre/kWh" } },
+              x: { title: { display: true, text: "Timme" } }
+            }
           }
-        }
-      });
+        });
+
+      } catch (e) {
+        document.body.innerHTML = `<p style="color:red">Fel: ${e.message}</p>`;
+      }
     }
 
     loadData();
