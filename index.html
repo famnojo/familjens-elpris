@@ -13,24 +13,38 @@
       margin: 0;
       padding: 0;
     }
+    h1 {
+      font-size: 2.2em;
+      margin: 20px 0 10px 0;
+    }
+    #updated {
+      font-size: 1em;
+      margin-bottom: 25px;
+      color: #bbbbbb;
+    }
+    h2 {
+      font-size: 1.8em;
+      margin: 30px 0 10px 0;
+      color: #00ff88;
+    }
+    .highlight {
+      font-size: 1.6em;
+      font-weight: bold;
+      color: #ffffff;
+      margin: 10px 0 20px 0;
+      display: block;
+      width: 100%;
+    }
     .chart-container {
       width: 95%;
-      max-width: 800px;
-      margin: 20px auto;
+      max-width: 900px;
+      margin: 10px auto 40px auto;
       height: 400px;
     }
     canvas {
       background-color: #1e1e1e;
       border-radius: 8px;
       padding: 10px;
-    }
-    h2 {
-      margin-top: 40px;
-    }
-    .highlight {
-      font-size: 1.2em;
-      color: #00ff88;
-      margin: 10px 0;
     }
   </style>
 </head>
@@ -63,7 +77,7 @@
         if (!response.ok) throw new Error("Kunde inte läsa data.json.");
         return await response.json();
       } catch (err) {
-        document.body.innerHTML = "<p style='color:red'>" + err.message + "</p>";
+        document.body.innerHTML = "<p style='color:red; font-size:1.5em;'>" + err.message + "</p>";
       }
     }
 
@@ -120,14 +134,14 @@
             y: {
               beginAtZero: true,
               suggestedMax: Math.max(...prices) + 5,
-              ticks: { color: "#f0f0f0" }
+              ticks: { color: "#f0f0f0", font: { size: 14 } }
             },
             x: {
-              ticks: { color: "#f0f0f0" }
+              ticks: { color: "#f0f0f0", font: { size: 14 } }
             }
           },
           plugins: {
-            legend: { labels: { color: "#f0f0f0" } }
+            legend: { labels: { color: "#f0f0f0", font: { size: 14 } } }
           }
         }
       });
@@ -149,7 +163,7 @@
       document.getElementById("best-today").textContent = bestToday;
       renderChart("chartToday", todayHours, todayPrices, todayMean);
 
-      // Imorgon (om finns)
+      // Imorgon
       if (data.tomorrow_hours && data.tomorrow_prices) {
         const tomorrowHours = data.tomorrow_hours;
         const tomorrowPrices = data.tomorrow_prices;
