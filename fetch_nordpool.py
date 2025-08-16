@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Hämtar SE3-priser för idag + (om publicerat) imorgon från elprisetjustnu.se
-# och skriver båda dagarna till data.json i det format som index.html använder.
-
 import json
 import datetime as dt
 import requests
@@ -16,9 +13,8 @@ def fetch_day(zone: str, date: dt.date):
     if r.status_code == 404:
         return None
     r.raise_for_status()
-    items = r.json()  # lista av timmar
-    hours = [it["time_start"] for it in items]  # ISO8601 (UTC)
-    # SEK/kWh -> öre/kWh
+    items = r.json()
+    hours = [it["time_start"] for it in items]
     prices_ore = [float(it["SEK_per_kWh"]) * 100.0 for it in items]
     mean_ore = (sum(prices_ore) / len(prices_ore)) if prices_ore else 0.0
     return {
@@ -28,24 +24,27 @@ def fetch_day(zone: str, date: dt.date):
     }
 
 def main():
-    # svensk tid i stämpeln
     generated_at = dt.datetime.now(dt.timezone(dt.timedelta(hours=2))).isoformat()
     today = dt.date.today()
     tomorrow = today + dt.timedelta(days=1)
 
     today_data = fetch_day(ZONE, today)
-    tomorrow_data = fetch_day(ZONE, tomorrow)  # kan vara None innan publicering
+    tomorrow_data = fetch_day(ZONE, tomorrow)
 
+    # Bygg JSON med dagens data i roten (bakåtkompatibelt)
     out = {
         "generated_at": generated_at,
-        "today": today_data or {"hours": [], "prices_ore_per_kwh": [], "mean_ore_per_kwh": 0},
+        "bidding_zone": ZONE,
+        "hours": today_data["hours"] if today_data else [],
+        "prices_ore_per_kwh": today_data["prices_ore_per_kwh"] if today_data else [],
+        "mean_ore_per_kwh": today_data["mean_ore_per_kwh"] if today_data else 0,
         "tomorrow": tomorrow_data or {"hours": [], "prices_ore_per_kwh": [], "mean_ore_per_kwh": 0}
     }
 
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
 
-    print("✅ Skrev data.json (idag + imorgon om tillgängligt)")
-
+    print("✅ Skrev data.json (idag i roten + imorgon i 'tomorrow')")
+    
 if __name__ == "__main__":
     main()
