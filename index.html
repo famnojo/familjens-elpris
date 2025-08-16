@@ -3,59 +3,84 @@
 <head>
   <meta charset="UTF-8">
   <title>Elpriser SE3</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background: #f7f7f7;
-    }
-    h1 {
-      text-align: center;
-    }
-    #error {
-      color: red;
-      font-weight: bold;
-      margin: 20px 0;
-    }
-    #chart {
-      max-width: 800px;
-      margin: 0 auto;
-    }
+    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+    canvas { max-width: 900px; margin: 40px auto; display: block; }
+    h2 { margin-top: 50px; }
   </style>
 </head>
 <body>
   <h1>Elpriser SE3</h1>
-  <div id="error"></div>
-  <div id="chart"></div>
+  <p id="lastUpdate"></p>
+
+  <h2>Dagens priser</h2>
+  <canvas id="chartToday"></canvas>
+
+  <h2>Morgondagens priser</h2>
+  <canvas id="chartTomorrow"></canvas>
 
   <script>
     async function loadData() {
       try {
-        const response = await fetch('data.json');
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("Filen data.json hittades inte. Kontrollera att den finns i samma mapp som index.html.");
-          } else {
-            throw new Error("HTTP-fel " + response.status + ": Kunde inte hämta data.json.");
+        const response = await fetch("data.json");
+        if (!response.ok) throw new Error("Misslyckades att läsa data.json");
+        const data = await response.json();
+
+        document.getElementById("lastUpdate").textContent =
+          `Senaste uppdatering: ${data.generated_at}`;
+
+        renderChart("chartToday", data.today, "Dagens priser");
+        if (data.tomorrow && data.tomorrow.hours && data.tomorrow.hours.length > 0) {
+          renderChart("chartTomorrow", data.tomorrow, "Morgondagens priser");
+        } else {
+          document.getElementById("chartTomorrow").replaceWith("Inga priser publicerade än.");
+        }
+      } catch (err) {
+        document.getElementById("lastUpdate").textContent = "Kunde inte läsa data.json.";
+      }
+    }
+
+    function renderChart(canvasId, dataset, label) {
+      const hours = dataset.hours.map(h => new Date(h).getHours() + ":00");
+      const prices = dataset.prices_ore_per_kwh;
+      const avg = dataset.mean_ore_per_kwh;
+
+      const colors = prices.map(p => p <= avg ? "green" : "red");
+
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: hours,
+          datasets: [
+            {
+              label: "Pris (öre/kWh)",
+              data: prices,
+              backgroundColor: colors
+            },
+            {
+              label: "Snitt",
+              data: new Array(prices.length).fill(avg),
+              type: "line",
+              borderColor: "blue",
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true }
+          },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: "öre/kWh" } },
+            x: { title: { display: true, text: "Timme" } }
           }
         }
-
-        let data;
-        try {
-          data = await response.json();
-        } catch (jsonErr) {
-          throw new Error("Filen data.json är inte giltig JSON.");
-        }
-
-        // Om allt är ok – visa datumet för senaste uppdatering
-        document.getElementById("chart").textContent =
-          "Senaste uppdatering: " + (data.generated_at || "okänt") +
-          " | Antal timmar: " + (data.hours ? data.hours.length : "0");
-
-      } catch (err) {
-        document.getElementById("error").textContent = err.message;
-        console.error(err);
-      }
+      });
     }
 
     loadData();
