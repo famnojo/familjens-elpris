@@ -1,184 +1,106 @@
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-  <meta charset="UTF-8">
-  <title>Elpriser SE3</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body {
-      background-color: #121212;
-      color: #f0f0f0;
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin: 0;
-      padding: 0;
-    }
-    h1 {
-      font-size: 2.2em;
-      margin: 20px 0 10px 0;
-    }
-    #updated {
-      font-size: 1em;
-      margin-bottom: 25px;
-      color: #bbbbbb;
-    }
-    h2 {
-      font-size: 1.8em;
-      margin: 30px 0 10px 0;
-      color: #00ff88;
-    }
-    .highlight {
-      font-size: 1.6em;
-      font-weight: bold;
-      color: #ffffff;
-      margin: 10px 0 20px 0;
-      display: block;
-      width: 100%;
-    }
-    .chart-container {
-      width: 95%;
-      max-width: 900px;
-      margin: 10px auto 40px auto;
-      height: 400px;
-    }
-    canvas {
-      background-color: #1e1e1e;
-      border-radius: 8px;
-      padding: 10px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Elpriser SE3</h1>
-  <p id="updated"></p>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+async function loadData() {
+  try {
+    const response = await fetch("data.json");
+    const data = await response.json();
 
-  <div>
-    <h2>Bästa tiden att ladda bilen (idag)</h2>
-    <p id="best-today" class="highlight"></p>
-  </div>
+    renderDay(
+      "todayChart",
+      "Dagens priser",
+      data.today_hours,
+      data.today_prices,
+      data.today_mean
+    );
 
-  <div class="chart-container">
-    <canvas id="chartToday"></canvas>
-  </div>
-
-  <div>
-    <h2>Bästa tiden att ladda bilen (imorgon)</h2>
-    <p id="best-tomorrow" class="highlight"></p>
-  </div>
-
-  <div class="chart-container">
-    <canvas id="chartTomorrow"></canvas>
-  </div>
-
-  <script>
-    async function loadData() {
-      try {
-        const response = await fetch("data.json");
-        if (!response.ok) throw new Error("Kunde inte läsa data.json.");
-        return await response.json();
-      } catch (err) {
-        document.body.innerHTML = "<p style='color:red; font-size:1.5em;'>" + err.message + "</p>";
-      }
+    if (data.tomorrow_hours) {
+      renderDay(
+        "tomorrowChart",
+        "Morgondagens priser",
+        data.tomorrow_hours,
+        data.tomorrow_prices,
+        data.tomorrow_mean
+      );
     }
+  } catch (e) {
+    document.body.innerHTML += "<p>Kunde inte läsa data.json</p>";
+  }
+}
 
-    function formatHour(isoTime) {
-      return new Date(isoTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-    }
+function renderDay(canvasId, title, hours, prices, mean) {
+  const ctx = document.getElementById(canvasId).getContext("2d");
 
-    function findBestWindow(hours, prices, windowSize) {
-      let bestStart = 0;
-      let bestAvg = Infinity;
+  const colors = prices.map(p => (p < mean ? "green" : "red"));
 
-      for (let i = 0; i <= prices.length - windowSize; i++) {
-        const windowPrices = prices.slice(i, i + windowSize);
-        const avg = windowPrices.reduce((a, b) => a + b, 0) / windowPrices.length;
-        if (avg < bestAvg) {
-          bestAvg = avg;
-          bestStart = i;
-        }
-      }
-      const start = formatHour(hours[bestStart]);
-      const end = formatHour(hours[bestStart + windowSize - 1]);
-      return `${start} – ${end} (snitt: ${bestAvg.toFixed(2)} öre/kWh)`;
-    }
-
-    function renderChart(ctxId, hours, prices, mean) {
-      const ctx = document.getElementById(ctxId).getContext("2d");
-      const colors = prices.map(p => (p <= mean ? "green" : "red"));
-      const labels = hours.map(h => formatHour(h));
-
-      new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: "öre/kWh",
-              data: prices,
-              backgroundColor: colors
-            },
-            {
-              label: "Dagens snitt",
-              data: Array(prices.length).fill(mean),
-              type: "line",
-              borderColor: "yellow",
-              borderWidth: 2,
-              pointRadius: 0
-            }
-          ]
+  const chart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: hours.map(h => h.slice(11,16)), // HH:MM
+      datasets: [
+        {
+          label: "öre/kWh",
+          data: prices,
+          backgroundColor: colors
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              beginAtZero: true,
-              suggestedMax: Math.max(...prices) + 5,
-              ticks: { color: "#f0f0f0", font: { size: 14 } }
-            },
-            x: {
-              ticks: { color: "#f0f0f0", font: { size: 14 } }
-            }
-          },
-          plugins: {
-            legend: { labels: { color: "#f0f0f0", font: { size: 14 } } }
-          }
+        {
+          label: "Snittpris",
+          type: "line",
+          data: Array(prices.length).fill(mean),
+          borderColor: "yellow",
+          borderWidth: 2,
+          pointRadius: 0
         }
-      });
-    }
-
-    async function main() {
-      const data = await loadData();
-      if (!data) return;
-
-      document.getElementById("updated").textContent =
-        "Senaste uppdatering: " + data.generated_at;
-
-      // Idag
-      const todayHours = data.hours;
-      const todayPrices = data.prices_ore_per_kwh;
-      const todayMean = data.mean_ore_per_kwh;
-
-      const bestToday = findBestWindow(todayHours, todayPrices, 5);
-      document.getElementById("best-today").textContent = bestToday;
-      renderChart("chartToday", todayHours, todayPrices, todayMean);
-
-      // Imorgon
-      if (data.tomorrow_hours && data.tomorrow_prices) {
-        const tomorrowHours = data.tomorrow_hours;
-        const tomorrowPrices = data.tomorrow_prices;
-        const tomorrowMean = data.tomorrow_mean;
-
-        const bestTomorrow = findBestWindow(tomorrowHours, tomorrowPrices, 5);
-        document.getElementById("best-tomorrow").textContent = bestTomorrow;
-        renderChart("chartTomorrow", tomorrowHours, tomorrowPrices, tomorrowMean);
-      } else {
-        document.getElementById("best-tomorrow").textContent =
-          "Inga priser publicerade än.";
+      ]
+    },
+    options: {
+      plugins: {
+        title: {
+          display: true,
+          text: title,
+          color: "white",
+          font: { size: 20 }
+        }
+      },
+      scales: {
+        x: { ticks: { color: "white" } },
+        y: {
+          ticks: { color: "white" },
+          beginAtZero: true,
+          suggestedMax: Math.max(...prices) + 5
+        }
       }
     }
+  });
 
-    main();
-  </script>
-</body>
-</html>
+  // Bästa 5h fönster
+  const best = bestWindow(hours, prices, 5);
+  const elem = document.getElementById(canvasId + "-best");
+  if (best) {
+    elem.textContent =
+      "Bästa tiden att ladda bilen: " +
+      formatHour(hours[best.start]) + " – " +
+      formatHour(new Date(new Date(hours[best.end]).getTime() + 60*60*1000));
+  }
+}
+
+function bestWindow(hours, prices, windowSize) {
+  if (prices.length < windowSize) return null;
+  let minAvg = Infinity;
+  let bestStart = 0;
+  for (let i = 0; i <= prices.length - windowSize; i++) {
+    const avg = prices.slice(i, i + windowSize).reduce((a,b)=>a+b,0)/windowSize;
+    if (avg < minAvg) {
+      minAvg = avg;
+      bestStart = i;
+    }
+  }
+  return { start: bestStart, end: bestStart + windowSize - 1 };
+}
+
+function formatHour(dateStr) {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+}
+
+loadData();
+</script>
