@@ -1,39 +1,61 @@
-name: Uppdatera elpriser
+name: Update Elpris Data
 
 on:
   schedule:
-    # Kör varje dag kl 14:30 svensk tid (12:30 UTC)
-    - cron: '30 12 * * *'
-  workflow_dispatch: # så att du kan köra manuellt via GitHub också
+    - cron: "30 13 * * *"   # Kör varje dag kl 14:30 svensk tid
+  workflow_dispatch:        # Kan även köras manuellt
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Hämta koden
-        uses: actions/checkout@v4
+      - name: Check out repo
+        uses: actions/checkout@v3
 
-      - name: Sätt upp Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.13'
+          python-version: "3.11"
 
-      - name: Installera beroenden
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install requests pandas
 
-      - name: Kör script för att hämta elpriser
+      - name: Fetch today's and tomorrow's prices
         run: |
-          python fetch_nordpool.py
+          python3 <<EOF
+          import requests, datetime, json
+          from pathlib import Path
 
-      - name: Commit och pusha uppdaterad data.json
+          base_url = "https://www.elprisetjustnu.se/api/v1/prices"
+
+          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=2)))  # svensk tid
+          year, month, day = now.year, f"{now.month:02d}", f"{now.day:02d}"
+          today_url = f"{base_url}/{year}/{month}-{day}_SE3.json"
+
+          tomorrow = now + datetime.timedelta(days=1)
+          y2, m2, d2 = tomorrow.year, f"{tomorrow.month:02d}", f"{tomorrow.day:02d}"
+          tomorrow_url = f"{base_url}/{y2}/{m2}-{d2}_SE3.json"
+
+          outdir = Path("data")
+          outdir.mkdir(exist_ok=True)
+
+          def fetch(url, filename):
+              r = requests.get(url)
+              if r.status_code == 200:
+                  with open(outdir / filename, "w") as f:
+                      f.write(r.text)
+                  print(f"✅ Saved {filename}")
+              else:
+                  print(f"⚠️ Could not fetch {url}, status {r.status_code}")
+
+          fetch(today_url, "today.json")
+          fetch(tomorrow_url, "tomorrow.json")
+          EOF
+
+      - name: Commit and push data
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add data.json
-          git commit -m "Automatisk uppdatering av data.json"
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add data/*.json
+          git commit -m "Update elpris data" || echo "No changes"
           git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
