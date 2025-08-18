@@ -1,106 +1,155 @@
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-async function loadData() {
-  try {
-    const response = await fetch("data.json");
-    const data = await response.json();
-
-    renderDay(
-      "todayChart",
-      "Dagens priser",
-      data.today_hours,
-      data.today_prices,
-      data.today_mean
-    );
-
-    if (data.tomorrow_hours) {
-      renderDay(
-        "tomorrowChart",
-        "Morgondagens priser",
-        data.tomorrow_hours,
-        data.tomorrow_prices,
-        data.tomorrow_mean
-      );
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <title>Familjens Elpris</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background-color: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      text-align: center;
     }
-  } catch (e) {
-    document.body.innerHTML += "<p>Kunde inte läsa data.json</p>";
-  }
-}
+    h1 {
+      margin: 20px 0;
+    }
+    h2 {
+      margin-top: 30px;
+      font-size: 1.4em;
+      color: #ffd700;
+    }
+    .best-window {
+      font-size: 1.6em;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #00ffcc;
+    }
+    canvas {
+      max-width: 100%;
+      margin: 20px auto;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>Elpriser SE3</h1>
 
-function renderDay(canvasId, title, hours, prices, mean) {
-  const ctx = document.getElementById(canvasId).getContext("2d");
+  <!-- Idag -->
+  <h2>Dagens priser</h2>
+  <div class="best-window" id="today-best"></div>
+  <canvas id="todayChart"></canvas>
 
-  const colors = prices.map(p => (p < mean ? "green" : "red"));
+  <!-- Imorgon -->
+  <h2>Morgondagens priser</h2>
+  <div class="best-window" id="tomorrow-best"></div>
+  <canvas id="tomorrowChart"></canvas>
 
-  const chart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: hours.map(h => h.slice(11,16)), // HH:MM
-      datasets: [
-        {
-          label: "öre/kWh",
-          data: prices,
-          backgroundColor: colors
-        },
-        {
-          label: "Snittpris",
-          type: "line",
-          data: Array(prices.length).fill(mean),
-          borderColor: "yellow",
-          borderWidth: 2,
-          pointRadius: 0
-        }
-      ]
-    },
-    options: {
-      plugins: {
-        title: {
-          display: true,
-          text: title,
-          color: "white",
-          font: { size: 20 }
-        }
-      },
-      scales: {
-        x: { ticks: { color: "white" } },
-        y: {
-          ticks: { color: "white" },
-          beginAtZero: true,
-          suggestedMax: Math.max(...prices) + 5
-        }
+  <script>
+    async function loadData() {
+      try {
+        const response = await fetch("data.json");
+        if (!response.ok) throw new Error("Misslyckades att läsa data.json");
+        const data = await response.json();
+        renderCharts(data);
+      } catch (e) {
+        console.error(e);
+        document.body.innerHTML = "<p>Kunde inte läsa data.json. Ladda upp en ny data.json enligt README.</p>";
       }
     }
-  });
 
-  // Bästa 5h fönster
-  const best = bestWindow(hours, prices, 5);
-  const elem = document.getElementById(canvasId + "-best");
-  if (best) {
-    elem.textContent =
-      "Bästa tiden att ladda bilen: " +
-      formatHour(hours[best.start]) + " – " +
-      formatHour(new Date(new Date(hours[best.end]).getTime() + 60*60*1000));
-  }
-}
+    function renderCharts(data) {
+      const hours = data.hours.map(h => new Date(h));
+      const prices = data.prices_ore_per_kwh;
+      const mean = data.mean_ore_per_kwh;
 
-function bestWindow(hours, prices, windowSize) {
-  if (prices.length < windowSize) return null;
-  let minAvg = Infinity;
-  let bestStart = 0;
-  for (let i = 0; i <= prices.length - windowSize; i++) {
-    const avg = prices.slice(i, i + windowSize).reduce((a,b)=>a+b,0)/windowSize;
-    if (avg < minAvg) {
-      minAvg = avg;
-      bestStart = i;
+      // Dela upp dagens och morgondagens timmar
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0,10);
+      const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().slice(0,10);
+
+      const todayHours = [];
+      const todayPrices = [];
+      const tomorrowHours = [];
+      const tomorrowPrices = [];
+
+      hours.forEach((h,i) => {
+        const d = h.toISOString().slice(0,10);
+        if (d === todayStr) {
+          todayHours.push(h);
+          todayPrices.push(prices[i]);
+        } else if (d === tomorrowStr) {
+          tomorrowHours.push(h);
+          tomorrowPrices.push(prices[i]);
+        }
+      });
+
+      // Rita diagram för idag
+      if (todayHours.length > 0) {
+        drawChart("todayChart", todayHours, todayPrices, mean, "today-best");
+      }
+
+      // Rita diagram för imorgon
+      if (tomorrowHours.length > 0) {
+        const tomorrowMean = tomorrowPrices.reduce((a,b) => a+b,0)/tomorrowPrices.length;
+        drawChart("tomorrowChart", tomorrowHours, tomorrowPrices, tomorrowMean, "tomorrow-best");
+      }
     }
-  }
-  return { start: bestStart, end: bestStart + windowSize - 1 };
-}
 
-function formatHour(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-}
+    function drawChart(canvasId, hours, prices, mean, bestId) {
+      const labels = hours.map(h => h.getHours() + ":00");
+      const colors = prices.map(p => p < mean ? "green" : "red");
 
-loadData();
-</script>
+      // Bästa 5-timmarsfönstret
+      let bestStart = 0;
+      let bestAvg = Infinity;
+      for (let i=0; i<=prices.length-5; i++) {
+        const avg = prices.slice(i,i+5).reduce((a,b)=>a+b,0)/5;
+        if (avg < bestAvg) {
+          bestAvg = avg;
+          bestStart = i;
+        }
+      }
+      const startHour = hours[bestStart].getHours();
+      const endHour = hours[bestStart+4].getHours()+1;
+      document.getElementById(bestId).textContent =
+        `Bästa tiden att ladda bilen: kl ${startHour} – ${endHour}`;
+
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: "öre/kWh",
+            data: prices,
+            backgroundColor: colors
+          },{
+            type: "line",
+            label: "Snitt",
+            data: new Array(prices.length).fill(mean),
+            borderColor: "yellow",
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              suggestedMax: Math.max(...prices) + 5
+            }
+          }
+        }
+      });
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
