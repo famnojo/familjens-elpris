@@ -13,6 +13,12 @@ jobs:
       - name: Checka ut repo
         uses: actions/checkout@v4
 
+      - name: Sätt upp Python + requests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip requests
+
       - name: Skapa data-mapp
         run: mkdir -p data
 
@@ -30,19 +36,17 @@ jobs:
           today = now_se.date()
           tomorrow = today + dt.timedelta(days=1)
 
-          def day_url(day):
-            return f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json}"
-
           def fetch_day(day):
             url = f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json"
             print(f"⇒ Hämtar: {url}")
             r = requests.get(url, timeout=30)
             if r.status_code == 404:
-              print("   (404 – ingen data ännu)")
+              print("   404 – ingen data ännu")
               return None
             r.raise_for_status()
             data = r.json()
             print(f"   Antal poster: {len(data)}")
+            # behåll formatet {time_start, SEK_per_kWh}
             return [
               {"time_start": it["time_start"], "SEK_per_kWh": float(it["SEK_per_kWh"])}
               for it in data
@@ -50,19 +54,23 @@ jobs:
 
           Path("data").mkdir(exist_ok=True)
 
+          # Dagens data (måste finnas)
           today_list = fetch_day(today)
           if not today_list:
             print("FEL: Kunde inte hämta dagens data – avbryter.", file=sys.stderr)
             sys.exit(1)
-          Path("data/today.json").write_text(json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8")
+          Path("data/today.json").write_text(
+            json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
 
+          # Morgondagens data (frivillig)
           tomorrow_list = fetch_day(tomorrow)
+          p = Path("data/tomorrow.json")
           if tomorrow_list:
-            Path("data/tomorrow.json").write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
+            p.write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
           else:
-            # Rensa bort ev. gammal tom/utdaterad fil så frontend inte visar gammal morgondag
-            p = Path("data/tomorrow.json")
             if p.exists():
+              print("   Tar bort gammal tomorrow.json så vi inte visar gammal morgondag.")
               p.unlink()
           PY
 
