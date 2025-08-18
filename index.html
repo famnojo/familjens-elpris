@@ -1,123 +1,41 @@
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-  <meta charset="UTF-8">
-  <title>Familjens Elpris</title>
+<body class="bg-black text-white">
+  <div class="container mx-auto p-4">
+    <h1 class="text-2xl font-bold mb-4">Elpriser SE3</h1>
+
+    <div id="today-section">
+      <h2 class="text-xl font-semibold mb-2">Dagens priser</h2>
+      <canvas id="todayChart"></canvas>
+      <div id="todayWindow" class="text-lg mt-2"></div>
+    </div>
+
+    <div id="tomorrow-section" style="display:none; margin-top:2rem;">
+      <h2 class="text-xl font-semibold mb-2">Morgondagens priser</h2>
+      <canvas id="tomorrowChart"></canvas>
+      <div id="tomorrowWindow" class="text-lg mt-2"></div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body {
-      background-color: #000;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 0;
-      text-align: center;
-    }
-    h1 {
-      margin: 20px 0;
-    }
-    h2 {
-      margin-top: 30px;
-      font-size: 1.4em;
-      color: #ffd700;
-    }
-    .best-window {
-      font-size: 1.6em;
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #00ffcc;
-    }
-    canvas {
-      max-width: 100%;
-      margin: 20px auto;
-      display: block;
-    }
-  </style>
-</head>
-<body>
-  <h1>Elpriser SE3</h1>
-
-  <!-- Idag -->
-  <h2>Dagens priser</h2>
-  <div class="best-window" id="today-best"></div>
-  <canvas id="todayChart"></canvas>
-
-  <!-- Imorgon -->
-  <h2>Morgondagens priser</h2>
-  <div class="best-window" id="tomorrow-best"></div>
-  <canvas id="tomorrowChart"></canvas>
-
   <script>
-    async function loadData() {
+    async function loadData(file) {
       try {
-        const response = await fetch("data.json");
-        if (!response.ok) throw new Error("Misslyckades att läsa data.json");
-        const data = await response.json();
-        renderCharts(data);
+        const response = await fetch(file);
+        if (!response.ok) return null;
+        return await response.json();
       } catch (e) {
-        console.error(e);
-        document.body.innerHTML = "<p>Kunde inte läsa data.json. Ladda upp en ny data.json enligt README.</p>";
+        return null;
       }
     }
 
-    function renderCharts(data) {
-      const hours = data.hours.map(h => new Date(h));
+    function renderChart(data, chartId, windowId) {
+      if (!data) return;
+      const ctx = document.getElementById(chartId).getContext("2d");
       const prices = data.prices_ore_per_kwh;
+      const labels = data.hours.map(h => new Date(h).getHours() + ":00");
       const mean = data.mean_ore_per_kwh;
 
-      // Dela upp dagens och morgondagens timmar
-      const today = new Date();
-      const todayStr = today.toISOString().slice(0,10);
-      const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().slice(0,10);
+      const colors = prices.map(p => (p <= mean ? "green" : "red"));
 
-      const todayHours = [];
-      const todayPrices = [];
-      const tomorrowHours = [];
-      const tomorrowPrices = [];
-
-      hours.forEach((h,i) => {
-        const d = h.toISOString().slice(0,10);
-        if (d === todayStr) {
-          todayHours.push(h);
-          todayPrices.push(prices[i]);
-        } else if (d === tomorrowStr) {
-          tomorrowHours.push(h);
-          tomorrowPrices.push(prices[i]);
-        }
-      });
-
-      // Rita diagram för idag
-      if (todayHours.length > 0) {
-        drawChart("todayChart", todayHours, todayPrices, mean, "today-best");
-      }
-
-      // Rita diagram för imorgon
-      if (tomorrowHours.length > 0) {
-        const tomorrowMean = tomorrowPrices.reduce((a,b) => a+b,0)/tomorrowPrices.length;
-        drawChart("tomorrowChart", tomorrowHours, tomorrowPrices, tomorrowMean, "tomorrow-best");
-      }
-    }
-
-    function drawChart(canvasId, hours, prices, mean, bestId) {
-      const labels = hours.map(h => h.getHours() + ":00");
-      const colors = prices.map(p => p < mean ? "green" : "red");
-
-      // Bästa 5-timmarsfönstret
-      let bestStart = 0;
-      let bestAvg = Infinity;
-      for (let i=0; i<=prices.length-5; i++) {
-        const avg = prices.slice(i,i+5).reduce((a,b)=>a+b,0)/5;
-        if (avg < bestAvg) {
-          bestAvg = avg;
-          bestStart = i;
-        }
-      }
-      const startHour = hours[bestStart].getHours();
-      const endHour = hours[bestStart+4].getHours()+1;
-      document.getElementById(bestId).textContent =
-        `Bästa tiden att ladda bilen: kl ${startHour} – ${endHour}`;
-
-      const ctx = document.getElementById(canvasId).getContext("2d");
       new Chart(ctx, {
         type: "bar",
         data: {
@@ -126,14 +44,14 @@
             label: "öre/kWh",
             data: prices,
             backgroundColor: colors
-          },{
+          },
+          {
+            label: "Dagens snitt",
+            data: Array(prices.length).fill(mean),
             type: "line",
-            label: "Snitt",
-            data: new Array(prices.length).fill(mean),
             borderColor: "yellow",
             borderWidth: 2,
-            pointRadius: 0,
-            fill: false
+            pointRadius: 0
           }]
         },
         options: {
@@ -142,14 +60,29 @@
           scales: {
             y: {
               beginAtZero: true,
-              suggestedMax: Math.max(...prices) + 5
+              max: Math.ceil(Math.max(...prices) / 10) * 10
             }
           }
         }
       });
+
+      // Bästa laddfönster (5 timmar)
+      const window5 = data.windows["5"] ? data.windows["5"][0] : null;
+      if (window5) {
+        document.getElementById(windowId).innerText =
+          `Bästa tiden att ladda bilen: ${new Date(window5.start).getHours()}:00 – ${new Date(window5.end).getHours()}:00`;
+      }
     }
 
-    loadData();
+    (async () => {
+      const today = await loadData("data/today.json");
+      if (today) renderChart(today, "todayChart", "todayWindow");
+
+      const tomorrow = await loadData("data/tomorrow.json");
+      if (tomorrow) {
+        document.getElementById("tomorrow-section").style.display = "block";
+        renderChart(tomorrow, "tomorrowChart", "tomorrowWindow");
+      }
+    })();
   </script>
 </body>
-</html>
