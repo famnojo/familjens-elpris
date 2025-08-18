@@ -1,56 +1,69 @@
-name: Uppdatera elpris-data
+name: Uppdatera elpris-data (SE3)
 
 on:
   schedule:
-    - cron: "30 12 * * *"   # kör 14:30 svensk tid (GitHub kör UTC)
-  workflow_dispatch:        # gör det även manuellt via GitHub-knapp
+    - cron: "30 12 * * *"   # 14:30 svensk tid (GitHub kör UTC)
+  workflow_dispatch:
 
 jobs:
   fetch-data:
     runs-on: ubuntu-latest
     steps:
       - name: Checka ut repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Installera Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
-      - name: Hämta data från API
+      - name: Hämta och skriv today.json & tomorrow.json
         run: |
-          python <<EOF
-          import requests, json, datetime, pytz
+          python - <<'PY'
+          import json, datetime, requests, os
+          from pathlib import Path
 
-          url = "https://www.elprisetjustnu.se/api/v1/prices.json?zone=SE3"
-          r = requests.get(url)
-          r.raise_for_status()
-          data = r.json()
+          TZ_OFFSET = "+02:00"  # sommartid, GitHub kör utan TZ – vi hämtar per kalenderdag ändå
+          BASE = "https://www.elprisetjustnu.se/api/v1/prices"
 
-          # Sortera på starttid
-          data.sort(key=lambda x: x["time_start"])
+          now = datetime.datetime.utcnow() + datetime.timedelta(hours=2)  # approx SE tid
+          today = now.date()
+          tomorrow = today + datetime.timedelta(days=1)
 
-          # Idag
-          today = [d for d in data if d["time_start"].startswith(datetime.datetime.now(pytz.timezone("Europe/Stockholm")).strftime("%Y-%m-%d"))]
+          def url_for(date):
+            return f"{BASE}/{date:%Y}/{date:%m}-{date:%d}_SE3.json"
 
-          # Imorgon
-          tomorrow_date = (datetime.datetime.now(pytz.timezone("Europe/Stockholm")) + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-          tomorrow = [d for d in data if d["time_start"].startswith(tomorrow_date)]
+          def fetch_day(date):
+            u = url_for(date)
+            r = requests.get(u, timeout=30)
+            if r.status_code != 200:
+              return None
+            data = r.json()
+            # data är lista med 24 poster, varje har SEK_per_kWh
+            out = [
+              {"time_start": it["time_start"], "SEK_per_kWh": float(it["SEK_per_kWh"])}
+              for it in data
+            ]
+            return out
 
-          # Spara idag
-          with open("data/today.json", "w") as f:
-              json.dump(today, f, indent=2, ensure_ascii=False)
+          Path("data").mkdir(exist_ok=True)
+          td = fetch_day(today)
+          if not td or len(td) == 0:
+            raise SystemExit("Kunde inte hämta dagens 24 timmar")
 
-          # Spara imorgon (om finns)
-          if tomorrow:
-              with open("data/tomorrow.json", "w") as f:
-                  json.dump(tomorrow, f, indent=2, ensure_ascii=False)
-          EOF
+          with open("data/today.json", "w", encoding="utf-8") as f:
+            json.dump(td, f, ensure_ascii=False, indent=2)
+
+          tm = fetch_day(tomorrow)
+          if tm and len(tm) > 0:
+            with open("data/tomorrow.json", "w", encoding="utf-8") as f:
+              json.dump(tm, f, ensure_ascii=False, indent=2)
+          PY
 
       - name: Commit & push
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/*.json
-          git commit -m "Uppdaterade elpris-data $(date +'%Y-%m-%d %H:%M:%S')" || echo "Inget att committa"
+          git add data/today.json data/tomorrow.json
+          git commit -m "Auto-uppdatering av today/tomorrow (SE3)" || echo "Inget att committa"
           git push
