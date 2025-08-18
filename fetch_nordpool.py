@@ -1,50 +1,48 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-import json
-import datetime as dt
 import requests
+import json
+from datetime import datetime, timedelta
 
 ZONE = "SE3"
-OUT_PATH = "data.json"
+BASE_URL = "https://www.elprisetjustnu.se/api/v1/prices"
 
-def fetch_day(zone: str, date: dt.date):
-    url = f"https://www.elprisetjustnu.se/api/v1/prices/{date:%Y}/{date:%m-%d}_{zone}.json"
-    r = requests.get(url, timeout=20)
-    if r.status_code == 404:
+def fetch_prices(date, zone):
+    url = f"{BASE_URL}/{date.year}/{date.strftime('%m-%d')}_{zone}.json"
+    r = requests.get(url)
+    if r.status_code != 200:
+        print(f"Inga data för {date}")
         return None
-    r.raise_for_status()
-    items = r.json()
-    hours = [it["time_start"] for it in items]
-    prices_ore = [float(it["SEK_per_kWh"]) * 100.0 for it in items]
-    mean_ore = (sum(prices_ore) / len(prices_ore)) if prices_ore else 0.0
-    return {
-        "hours": hours,
-        "prices_ore_per_kwh": prices_ore,
-        "mean_ore_per_kwh": mean_ore
-    }
+    return r.json()
+
+def process_data(raw):
+    hours = [h["time_start"] for h in raw]
+    prices = [h["SEK_per_kWh"] * 100 for h in raw]  # till öre
+    mean_price = sum(prices) / len(prices)
+    return hours, prices, mean_price
 
 def main():
-    generated_at = dt.datetime.now(dt.timezone(dt.timedelta(hours=2))).isoformat()
-    today = dt.date.today()
-    tomorrow = today + dt.timedelta(days=1)
+    today = datetime.now()
+    tomorrow = today + timedelta(days=1)
 
-    today_data = fetch_day(ZONE, today)
-    tomorrow_data = fetch_day(ZONE, tomorrow)
+    today_raw = fetch_prices(today, ZONE)
+    tomorrow_raw = fetch_prices(tomorrow, ZONE)
 
-    # Bygg JSON med dagens data i roten (bakåtkompatibelt)
-    out = {
-        "generated_at": generated_at,
-        "bidding_zone": ZONE,
-        "hours": today_data["hours"] if today_data else [],
-        "prices_ore_per_kwh": today_data["prices_ore_per_kwh"] if today_data else [],
-        "mean_ore_per_kwh": today_data["mean_ore_per_kwh"] if today_data else 0,
-        "tomorrow": tomorrow_data or {"hours": [], "prices_ore_per_kwh": [], "mean_ore_per_kwh": 0}
-    }
+    data = {}
+    if today_raw:
+        h, p, m = process_data(today_raw)
+        data["today_hours"] = h
+        data["today_prices"] = p
+        data["today_mean"] = m
 
-    with open(OUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+    if tomorrow_raw:
+        h, p, m = process_data(tomorrow_raw)
+        data["tomorrow_hours"] = h
+        data["tomorrow_prices"] = p
+        data["tomorrow_mean"] = m
 
-    print("✅ Skrev data.json (idag i roten + imorgon i 'tomorrow')")
-    
+    data["generated_at"] = datetime.now().isoformat()
+
+    with open("data.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 if __name__ == "__main__":
     main()
