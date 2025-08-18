@@ -1,36 +1,39 @@
-name: Uppdatera elpriser (idag + imorgon)
+name: Uppdatera elpriser
 
 on:
   schedule:
-    - cron: "30 12 * * *"   # 12:30 UTC = 14:30 svensk tid (sommartid), 13:30 vintertid
-  workflow_dispatch:        # tillåt manuell körning
+    # Kör varje dag kl 14:30 svensk tid (12:30 UTC)
+    - cron: '30 12 * * *'
+  workflow_dispatch: # så att du kan köra manuellt via GitHub också
 
 jobs:
-  update:
+  update-data:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
     steps:
-      - name: Checka ut repo
+      - name: Hämta koden
         uses: actions/checkout@v4
 
-      - name: Installera Python
+      - name: Sätt upp Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.13'
 
       - name: Installera beroenden
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests; fi
+          pip install -r requirements.txt
 
-      - name: Kör scriptet
-        run: python fetch_nordpool.py
-
-      - name: Commit & push data.json
+      - name: Kör script för att hämta elpriser
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python fetch_nordpool.py
+
+      - name: Commit och pusha uppdaterad data.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
           git add data.json
-          git commit -m "Auto: uppdaterar elpriser ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "Inga ändringar"
+          git commit -m "Automatisk uppdatering av data.json"
           git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
