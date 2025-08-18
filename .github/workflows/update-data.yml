@@ -1,38 +1,84 @@
-name: Uppdatera elpriser
+name: Uppdatera elpriser (SE3)
 
 on:
   schedule:
-    - cron: '30 12 * * *'   # körs varje dag kl 14:30 svensk tid (12:30 UTC)
-  workflow_dispatch:        # kan även köras manuellt
+    - cron: "30 12 * * *"   # 14:30 svensk tid (GitHub kör UTC)
+  workflow_dispatch:
 
 jobs:
-  update-data:
+  fetch-data:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Klona repo
-        uses: actions/checkout@v3
+      - name: Checka ut repo
+        uses: actions/checkout@v4
 
-      - name: Hämta dagens datum
-        id: today
-        run: echo "date=$(date +'%Y/%m-%d')" >> $GITHUB_OUTPUT
+      - name: Skapa data-mapp
+        run: mkdir -p data
 
-      - name: Ladda ner dagens priser
+      - name: Hämta och skriv today.json & tomorrow.json
         run: |
-          URL="https://www.elprisetjustnu.se/api/v1/prices/${{ steps.today.outputs.date }}_SE3.json"
-          echo "Hämtar $URL"
-          curl -s "$URL" > data/today.json
+          python - <<'PY'
+          import json, datetime as dt, requests, sys
+          from zoneinfo import ZoneInfo
+          from pathlib import Path
 
-      - name: Försök hämta morgondagens priser
+          ZONE = "SE3"
+          BASE = "https://www.elprisetjustnu.se/api/v1/prices"
+
+          now_se = dt.datetime.now(ZoneInfo("Europe/Stockholm"))
+          today = now_se.date()
+          tomorrow = today + dt.timedelta(days=1)
+
+          def day_url(day):
+            return f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json}"
+
+          def fetch_day(day):
+            url = f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json"
+            print(f"⇒ Hämtar: {url}")
+            r = requests.get(url, timeout=30)
+            if r.status_code == 404:
+              print("   (404 – ingen data ännu)")
+              return None
+            r.raise_for_status()
+            data = r.json()
+            print(f"   Antal poster: {len(data)}")
+            return [
+              {"time_start": it["time_start"], "SEK_per_kWh": float(it["SEK_per_kWh"])}
+              for it in data
+            ]
+
+          Path("data").mkdir(exist_ok=True)
+
+          today_list = fetch_day(today)
+          if not today_list:
+            print("FEL: Kunde inte hämta dagens data – avbryter.", file=sys.stderr)
+            sys.exit(1)
+          Path("data/today.json").write_text(json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8")
+
+          tomorrow_list = fetch_day(tomorrow)
+          if tomorrow_list:
+            Path("data/tomorrow.json").write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
+          else:
+            # Rensa bort ev. gammal tom/utdaterad fil så frontend inte visar gammal morgondag
+            p = Path("data/tomorrow.json")
+            if p.exists():
+              p.unlink()
+          PY
+
+      - name: Visa genererade filer
         run: |
-          TOMORROW=$(date -d tomorrow +'%Y/%m-%d')
-          URL="https://www.elprisetjustnu.se/api/v1/prices/${TOMORROW}_SE3.json"
-          echo "Hämtar $URL"
-          curl -s "$URL" -o data/tomorrow.json || echo "Ingen morgondata än"
+          echo "----- ls data -----"
+          ls -l data || true
+          echo "----- head today -----"
+          head -n 40 data/today.json || true
+          echo "----- head tomorrow -----"
+          head -n 40 data/tomorrow.json || true
 
       - name: Commit & push
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add data/today.json data/tomorrow.json || true
-          git commit -m "Uppdaterade priser $(date)" || echo "Inget att commit:a"
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/today.json data/tomorrow.json
+          git commit -m "Auto: uppdatera today/tomorrow (SE3)" || echo "Inget att committa"
           git push
