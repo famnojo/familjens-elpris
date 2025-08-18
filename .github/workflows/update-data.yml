@@ -5,6 +5,9 @@ on:
     - cron: "30 12 * * *"   # 14:30 svensk tid (GitHub kör UTC)
   workflow_dispatch:
 
+permissions:
+  contents: write   # <- viktigt för push
+
 jobs:
   fetch-data:
     runs-on: ubuntu-latest
@@ -12,6 +15,9 @@ jobs:
     steps:
       - name: Checka ut repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Sätt upp Python + requests
         uses: actions/setup-python@v5
@@ -46,7 +52,6 @@ jobs:
             r.raise_for_status()
             data = r.json()
             print(f"   Antal poster: {len(data)}")
-            # behåll formatet {time_start, SEK_per_kWh}
             return [
               {"time_start": it["time_start"], "SEK_per_kWh": float(it["SEK_per_kWh"])}
               for it in data
@@ -54,7 +59,7 @@ jobs:
 
           Path("data").mkdir(exist_ok=True)
 
-          # Dagens data (måste finnas)
+          # Dagens (måste finnas)
           today_list = fetch_day(today)
           if not today_list:
             print("FEL: Kunde inte hämta dagens data – avbryter.", file=sys.stderr)
@@ -63,7 +68,7 @@ jobs:
             json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8"
           )
 
-          # Morgondagens data (frivillig)
+          # Morgondagens (frivillig)
           tomorrow_list = fetch_day(tomorrow)
           p = Path("data/tomorrow.json")
           if tomorrow_list:
@@ -83,10 +88,8 @@ jobs:
           echo "----- head tomorrow -----"
           head -n 40 data/tomorrow.json || true
 
-      - name: Commit & push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add data/today.json data/tomorrow.json
-          git commit -m "Auto: uppdatera today/tomorrow (SE3)" || echo "Inget att committa"
-          git push
+      - name: Commit & push ändringar
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto: uppdatera today/tomorrow (SE3)"
+          file_pattern: "data/*.json"
