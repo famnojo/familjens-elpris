@@ -1,200 +1,169 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="sv">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Elpriser SE3</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root{
-      --bg:#0b132b; --fg:#e5e7eb; --card:#111827; --muted:#9ca3af;
-      --ok:#22c55e; --bad:#ef4444; --mean:#facc15;
-      --wrapH: 420px; --wrapH-lg: 520px; --maxW: 980px;
+    body {
+      background-color: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
     }
-    *{ box-sizing:border-box; }
-    body{ margin:0; font-family: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial; background:var(--bg); color:var(--fg); }
-    header{ padding:16px 20px; border-bottom:1px solid #1f2937; }
-    h1{ margin:0; font-size:26px; line-height:1.2; }
-    .sub{ color:var(--muted); margin-top:6px; font-size:14px; }
-    main{ max-width:var(--maxW); margin:0 auto; padding:16px; display:grid; gap:16px; }
-    .cards{ display:grid; gap:16px; grid-template-columns: 1fr; }
-    @media(min-width:900px){ .cards{ grid-template-columns: 1fr 1fr; } }
-    .card{ background:var(--card); border:1px solid #1f2937; border-radius:14px; padding:16px; }
-    .bestTitle{ font-size: clamp(20px, 7vw, 30px); font-weight:800; margin-bottom:6px; }
-    .best{ font-size: clamp(16px, 6vw, 24px); font-weight:700; margin:0 0 12px; }
-    .chartwrap{ height: var(--wrapH); }
-    @media (min-width:900px){ .chartwrap{ height: var(--wrapH-lg); } }
-    .legend{ color:var(--muted); font-size:13px; margin-top:8px; }
-    .meanLabel{ color:var(--mean); font-size:16px; margin-top:10px; }
-    .error{ background:#7f1d1d; color:#fee2e2; border:1px solid #b91c1c; border-radius:12px; padding:12px; margin:12px 0; font-size:14px; display:none; }
-    footer{ text-align:center; color:var(--muted); padding:12px; font-size:13px; }
-    #status{ color:var(--muted); padding:12px 16px; font-size:12px; }
+    h1 {
+      font-size: 2em;
+      margin: 10px 0;
+    }
+    h2 {
+      margin-top: 20px;
+      font-size: 1.5em;
+    }
+    .best-time {
+      font-size: 1.3em;
+      font-weight: bold;
+      margin: 10px 0;
+      color: #0f0;
+    }
+    .chart-container {
+      width: 100%;
+      max-width: 800px;
+      margin: auto;
+    }
+    canvas {
+      margin: 20px 0;
+    }
+    .mean-text {
+      color: yellow;
+      margin: 10px 0 30px 0;
+      font-size: 1.2em;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Elpriser SE3</h1>
-    <div class="sub" id="updated">Laddar…</div>
-  </header>
+  <h1>Elpriser SE3</h1>
 
-  <main>
-    <div class="cards">
-      <!-- IDAG -->
-      <section class="card" id="todayCard">
-        <div class="bestTitle">Bästa tiden att ladda bilen</div>
-        <div class="best" id="todayBest">–</div>
-        <div class="chartwrap"><canvas id="todayChart"></canvas></div>
-        <div class="meanLabel">Dygnssnitt: <span id="todayMean">–</span></div>
-        <div class="legend">Grönt = under snitt • Rött = över snitt • Gul linje = snitt</div>
-      </section>
+  <h2>Idag</h2>
+  <div id="best-today" class="best-time"></div>
+  <div class="chart-container">
+    <canvas id="todayChart"></canvas>
+    <div id="mean-today" class="mean-text"></div>
+  </div>
 
-      <!-- IMORGON -->
-      <section class="card" id="tomorrowCard" style="display:none;">
-        <div class="bestTitle">Bästa tiden att ladda bilen</div>
-        <div class="best" id="tomorrowBest">–</div>
-        <div class="chartwrap"><canvas id="tomorrowChart"></canvas></div>
-        <div class="meanLabel">Dygnssnitt: <span id="tomorrowMean">–</span></div>
-        <div class="legend">Grönt = under snitt • Rött = över snitt • Gul linje = snitt</div>
-      </section>
-    </div>
+  <h2>Imorgon</h2>
+  <div id="best-tomorrow" class="best-time"></div>
+  <div class="chart-container">
+    <canvas id="tomorrowChart"></canvas>
+    <div id="mean-tomorrow" class="mean-text"></div>
+  </div>
 
-    <div id="errorBox" class="error"></div>
-  </main>
-
-  <footer>
-    <div id="status">Försöker läsa: <code>data/today.json</code> (och <code>data/tomorrow.json</code> om den finns)</div>
-    <div>Priser i öre/kWh</div>
-  </footer>
-
-<script>
-(async function(){
-  const tz = 'Europe/Stockholm';
-  const updatedEl = document.getElementById('updated');
-  const statusEl  = document.getElementById('status');
-  const errorEl   = document.getElementById('errorBox');
-
-  const fmtTime = (d) => d.toLocaleString('sv-SE', { timeZone: tz, hour:'2-digit', minute:'2-digit' });
-  const fmtOre  = (v) => `${Math.round(v)} öre`;
-
-  async function fetchJSON(path){
-    try{
-      const r = await fetch(path+'?ts='+Date.now(), {cache:'no-store'});
-      if(!r.ok) return {ok:false, status:r.status};
-      return {ok:true, json: await r.json()};
-    }catch(e){ return {ok:false, error:String(e)}; }
-  }
-
-  // Läser en dygnsfil (24 rader) och normaliserar till {hours[], prices[], mean, generated_at}
-  function normalizeDay(json){
-    if(!json) return null;
-
-    // Rå lista från elprisetjustnu.se
-    if(Array.isArray(json) && json.length){
-      const hours  = json.map(x => x.time_start);
-      const prices = json.map(x => Number(x.SEK_per_kWh) * 100);
-      const mean   = prices.reduce((a,b)=>a+b,0) / prices.length;
-      const gen    = json[0].time_start; // första timmens start
-      return {hours, prices, mean, generated_at: gen};
-    }
-
-    // Alternativt bearbetad struktur (om du skulle byta)
-    if(json.hours && json.prices_ore_per_kwh){
-      const hours  = json.hours.slice();
-      const prices = json.prices_ore_per_kwh.map(Number);
-      const mean   = prices.reduce((a,b)=>a+b,0) / prices.length;
-      const gen    = json.generated_at || hours[0] || null;
-      return {hours, prices, mean, generated_at: gen};
-    }
-
-    return null;
-  }
-
-  function findBestWindow5(hoursISO, prices){
-    if(!hoursISO || prices.length < 5) return null;
-    let bestStart = 0, bestAvg = Infinity;
-    for(let i=0; i<=prices.length-5; i++){
-      const avg = (prices[i]+prices[i+1]+prices[i+2]+prices[i+3]+prices[i+4]) / 5;
-      if(avg < bestAvg){ bestAvg = avg; bestStart = i; }
-    }
-    const start = new Date(hoursISO[bestStart]);
-    const endStart = new Date(hoursISO[bestStart+4]);
-    const end = new Date(endStart.getTime() + 60*60*1000); // inkl sista hela timmen
-    return { start, end, avg: bestAvg };
-  }
-
-  function renderChart(canvasId, hoursISO, prices, mean){
-    const labels = hoursISO.map(h => {
-      const d = new Date(h);
-      return d.toLocaleString('sv-SE', { timeZone: tz, hour:'2-digit' });
-    });
-    const colors = prices.map(p => p < mean ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)');
-    const maxVal = prices.length ? Math.max(...prices) : 0;
-    const suggestedMax = Math.round(Math.max(maxVal, mean) * 1.1);
-
-    new Chart(document.getElementById(canvasId), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label:'öre/kWh', data: prices, backgroundColor: colors },
-          { label:'Snitt', type:'line', data: new Array(prices.length).fill(mean),
-            borderColor: 'rgba(250,204,21,1)', borderWidth: 2, pointRadius: 0 }
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          y: { beginAtZero: true, suggestedMax,
-               title: { display:true, text:'öre/kWh', color:'#e5e7eb' },
-               ticks: { color:'#e5e7eb', precision:0 } },
-          x: { ticks: { color:'#e5e7eb' } }
-        },
-        plugins: { legend: { labels: { color:'#e5e7eb' } } }
+  <script>
+    async function loadData(file) {
+      try {
+        const response = await fetch(file);
+        if (!response.ok) throw new Error("Kunde inte läsa " + file);
+        return await response.json();
+      } catch (err) {
+        console.error(err);
+        return null;
       }
-    });
-  }
-
-  // --- Ladda TODAY ---
-  const todayRes = await fetchJSON('./data/today.json');
-  statusEl.textContent = `Läste today.json: ${todayRes.ok ? 'OK' : ('Fel ' + (todayRes.status || todayRes.error || ''))}`;
-
-  if(!todayRes.ok){
-    errorEl.style.display='block';
-    errorEl.textContent = 'Hittade ingen data för IDAG. Kontrollera att data/today.json finns (24 rader).';
-    return;
-  }
-
-  const today = normalizeDay(todayRes.json);
-  if(!today || today.hours.length === 0){
-    errorEl.style.display='block';
-    errorEl.textContent = 'Ogiltigt format i data/today.json.';
-    return;
-  }
-
-  updatedEl.textContent = 'Senast uppdaterad: ' +
-    new Date(today.generated_at || Date.now()).toLocaleString('sv-SE', { timeZone: tz });
-
-  // Bästa 5h fönster & diagram (IDAG)
-  document.getElementById('todayMean').textContent = fmtOre(today.mean);
-  const best = findBestWindow5(today.hours, today.prices);
-  document.getElementById('todayBest').textContent = best ?
-    `${fmtTime(best.start)} – ${fmtTime(best.end)}  ·  snitt ${fmtOre(best.avg)}` : '–';
-  renderChart('todayChart', today.hours, today.prices, today.mean);
-
-  // --- Ladda TOMORROW (om finns) ---
-  const tomorrowRes = await fetchJSON('./data/tomorrow.json');
-  if(tomorrowRes.ok){
-    const tomorrow = normalizeDay(tomorrowRes.json);
-    if(tomorrow && tomorrow.hours.length){
-      document.getElementById('tomorrowCard').style.display = 'block';
-      document.getElementById('tomorrowMean').textContent = fmtOre(tomorrow.mean);
-      const bestT = findBestWindow5(tomorrow.hours, tomorrow.prices);
-      document.getElementById('tomorrowBest').textContent = bestT ?
-        `${fmtTime(bestT.start)} – ${fmtTime(bestT.end)}  ·  snitt ${fmtOre(bestT.avg)}` : '–';
-      renderChart('tomorrowChart', tomorrow.hours, tomorrow.prices, tomorrow.mean);
     }
-  }
-})();
-</script>
+
+    function findBestWindow(prices, hours, windowSize = 5) {
+      let bestAvg = Infinity;
+      let bestStart = 0;
+      for (let i = 0; i <= prices.length - windowSize; i++) {
+        const avg = prices.slice(i, i + windowSize).reduce((a, b) => a + b, 0) / windowSize;
+        if (avg < bestAvg) {
+          bestAvg = avg;
+          bestStart = i;
+        }
+      }
+      const startHour = new Date(hours[bestStart]);
+      const endHour = new Date(hours[bestStart + windowSize - 1]);
+      return `${startHour.getHours()}:00 - ${endHour.getHours() + 1}:00`;
+    }
+
+    function renderChart(canvasId, hours, prices, mean) {
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      const colors = prices.map(p => p < mean ? "green" : "red");
+
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: hours.map(h => {
+            const d = new Date(h);
+            return `${d.getHours()}:00`;
+          }),
+          datasets: [
+            {
+              label: "öre/kWh",
+              data: prices,
+              backgroundColor: colors
+            },
+            {
+              label: "Snitt",
+              data: Array(prices.length).fill(mean),
+              type: "line",
+              borderColor: "yellow",
+              borderWidth: 2,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              suggestedMax: Math.max(...prices) + 10,
+              title: {
+                display: true,
+                text: "öre/kWh",
+                color: "#fff"
+              },
+              ticks: { color: "#fff" }
+            },
+            x: {
+              ticks: { color: "#fff" }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: { color: "#fff" }
+            }
+          }
+        }
+      });
+    }
+
+    async function init() {
+      const today = await loadData("data/today.json");
+      if (today) {
+        const bestWindow = findBestWindow(today.prices_ore_per_kwh, today.hours);
+        document.getElementById("best-today").innerText = "Bästa tiden att ladda bilen: " + bestWindow;
+        document.getElementById("mean-today").innerText = `Dygnssnitt: ${today.mean_ore_per_kwh.toFixed(2)} öre/kWh`;
+        renderChart("todayChart", today.hours, today.prices_ore_per_kwh, today.mean_ore_per_kwh);
+      } else {
+        document.getElementById("best-today").innerText = "Ingen data för idag.";
+      }
+
+      const tomorrow = await loadData("data/tomorrow.json");
+      if (tomorrow) {
+        const bestWindow = findBestWindow(tomorrow.prices_ore_per_kwh, tomorrow.hours);
+        document.getElementById("best-tomorrow").innerText = "Bästa tiden att ladda bilen: " + bestWindow;
+        document.getElementById("mean-tomorrow").innerText = `Dygnssnitt: ${tomorrow.mean_ore_per_kwh.toFixed(2)} öre/kWh`;
+        renderChart("tomorrowChart", tomorrow.hours, tomorrow.prices_ore_per_kwh, tomorrow.mean_ore_per_kwh);
+      } else {
+        document.getElementById("best-tomorrow").innerText = "Ingen data för imorgon än.";
+      }
+    }
+
+    init();
+  </script>
 </body>
 </html>
