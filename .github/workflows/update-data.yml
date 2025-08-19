@@ -1,12 +1,13 @@
-name: Uppdatera elpriser (SE3)
+name: Uppdatera elpriser (SE3) 14:30 + 00:10
 
 on:
   schedule:
-    - cron: "30 12 * * *"   # 14:30 svensk tid (GitHub kör UTC)
+    - cron: "30 12 * * *"   # 14:30 Europe/Stockholm (UTC+2 sommartid)
+    - cron: "10 22 * * *"   # 00:10 Europe/Stockholm (22:10 UTC föregående dag)
   workflow_dispatch:
 
 permissions:
-  contents: write   # <- viktigt för push
+  contents: write
 
 jobs:
   fetch-data:
@@ -28,7 +29,7 @@ jobs:
       - name: Skapa data-mapp
         run: mkdir -p data
 
-      - name: Hämta och skriv today.json & tomorrow.json
+      - name: Hämta och skriv today.json & tomorrow.json (robust)
         run: |
           python - <<'PY'
           import json, datetime as dt, requests, sys
@@ -40,7 +41,7 @@ jobs:
 
           now_se = dt.datetime.now(ZoneInfo("Europe/Stockholm"))
           today = now_se.date()
-          tomorrow = today + dt.timedelta(days=1)
+          wanted_tomorrow = today + dt.timedelta(days=1)
 
           def fetch_day(day):
             url = f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json"
@@ -52,41 +53,57 @@ jobs:
             r.raise_for_status()
             data = r.json()
             print(f"   Antal poster: {len(data)}")
-            return [
+            if len(data) != 24:
+              print("   VARNING: inte 24 poster – ogiltigt.")
+              return None
+            # normalisera
+            out = [
               {"time_start": it["time_start"], "SEK_per_kWh": float(it["SEK_per_kWh"])}
               for it in data
             ]
+            return out
+
+          def file_date_first_entry(path: Path):
+            try:
+              arr = json.loads(path.read_text(encoding="utf-8"))
+              if not arr: return None
+              return arr[0]["time_start"][:10]
+            except Exception:
+              return None
 
           Path("data").mkdir(exist_ok=True)
 
-          # Dagens (måste finnas)
+          # 1) IDAG (måste finnas)
           today_list = fetch_day(today)
           if not today_list:
-            print("FEL: Kunde inte hämta dagens data – avbryter.", file=sys.stderr)
+            print("FEL: Kunde inte hämta dagens 24 timmar – avbryter.", file=sys.stderr)
             sys.exit(1)
-          Path("data/today.json").write_text(
-            json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8"
-          )
+          Path("data/today.json").write_text(json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8")
+          print("   Skrev data/today.json")
 
-          # Morgondagens (frivillig)
-          tomorrow_list = fetch_day(tomorrow)
+          # 2) IMORGON (om publicerat). Efter midnatt får denna gärna saknas.
+          tomorrow_list = fetch_day(wanted_tomorrow)
           p = Path("data/tomorrow.json")
           if tomorrow_list:
-            p.write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
+            # kontrollera att filen verkligen gäller "rätt morgondag"
+            first_date = tomorrow_list[0]["time_start"][:10]
+            if first_date == f"{wanted_tomorrow:%Y-%m-%d}":
+              p.write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
+              print("   Skrev data/tomorrow.json")
+            else:
+              print(f"   Avbryter skrivning: tomorrow.json första datum {first_date} != {wanted_tomorrow:%Y-%m-%d}")
           else:
+            # om ingen morgondag publicerad: ta bort gammal tomorrow.json om den avser fel datum
             if p.exists():
-              print("   Tar bort gammal tomorrow.json så vi inte visar gammal morgondag.")
-              p.unlink()
+              existing = file_date_first_entry(p)
+              if existing != f"{wanted_tomorrow:%Y-%m-%d}":
+                print("   Tar bort inaktuell data/tomorrow.json (fel datum).")
+                p.unlink()
+              else:
+                print("   Behåller befintlig tomorrow.json som redan gäller korrekt morgondag.")
+            else:
+              print("   Ingen tomorrow.json att uppdatera.")
           PY
-
-      - name: Visa genererade filer
-        run: |
-          echo "----- ls data -----"
-          ls -l data || true
-          echo "----- head today -----"
-          head -n 40 data/today.json || true
-          echo "----- head tomorrow -----"
-          head -n 40 data/tomorrow.json || true
 
       - name: Commit & push ändringar
         uses: stefanzweifel/git-auto-commit-action@v5
