@@ -58,15 +58,27 @@
 <script>
 const tz = 'Europe/Stockholm';
 
+function localYMD(d=new Date()){
+  return new Intl.DateTimeFormat('sv-SE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'})
+    .format(d).replaceAll('-', '');
+}
+function dateISOtoYMD(iso){
+  return iso.slice(0,10).replaceAll('-',''); // "2025-08-19" -> "20250819"
+}
+function sameLocalHour(aISO, bDate){
+  const a = new Date(aISO);
+  const fmt = (d)=> new Intl.DateTimeFormat('sv-SE',{timeZone:tz,hour:'2-digit'}).format(d);
+  return fmt(a) === fmt(bDate);
+}
+
 async function readDay(path){
   try{
     const r = await fetch(path + '?t=' + Date.now(), {cache:'no-store'});
     if(!r.ok) return {ok:false, status:r.status};
     const arr = await r.json();
     if(!Array.isArray(arr) || arr.length !== 24) return {ok:false, error:'Fel format (måste vara 24 rader)'};
-    // konvertera -> timmar + öre/kWh
     const hoursISO = arr.map(x => x.time_start);
-    const pricesOre = arr.map(x => Math.round(Number(x.SEK_per_kWh) * 10000) / 100); // exakt öre
+    const pricesOre = arr.map(x => Math.round(Number(x.SEK_per_kWh)*10000)/100); // SEK -> öre
     const mean = pricesOre.reduce((a,b)=>a+b,0)/pricesOre.length;
     return {ok:true, hoursISO, pricesOre, mean};
   }catch(e){
@@ -81,7 +93,6 @@ function findBest5(hoursISO, prices){
     const avg = (prices[i]+prices[i+1]+prices[i+2]+prices[i+3]+prices[i+4])/5;
     if(avg < bestAvg){ bestAvg = avg; bestIdx = i; }
   }
-  // slutet ska inkludera sista HELA timmen => +1h
   const start = new Date(hoursISO[bestIdx]);
   const endStart = new Date(hoursISO[bestIdx+4]);
   const end = new Date(endStart.getTime() + 60*60*1000);
@@ -90,8 +101,22 @@ function findBest5(hoursISO, prices){
 }
 
 function render(canvasId, hoursISO, prices, mean){
+  const now = new Date();
   const labels = hoursISO.map(h => new Date(h).toLocaleTimeString('sv-SE',{timeZone:tz,hour:'2-digit'}));
-  const colors = prices.map(p => p < mean ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)');
+
+  // Färglogik:
+  // - vit för aktuell timme
+  // - grön om p < 0.85*mean
+  // - gul om 0.85*mean <= p < mean
+  // - röd om p >= mean
+  const thr = 0.85*mean;
+  const colors = prices.map((p,i)=>{
+    if (sameLocalHour(hoursISO[i], now)) return 'rgba(255,255,255,0.95)'; // vit
+    if (p < thr) return 'rgba(34,197,94,0.9)';    // grön
+    if (p < mean) return 'rgba(250,204,21,0.9)';  // gul
+    return 'rgba(239,68,68,0.9)';                 // röd
+  });
+
   const maxVal = Math.max(...prices, mean);
   const suggestedMax = Math.ceil(maxVal * 1.1);
 
@@ -118,27 +143,44 @@ function render(canvasId, hoursISO, prices, mean){
   });
 }
 
-(async function init(){
-  // IDAG
+async function init(){
+  // Läs in idag + ev. imorgon
   const tRes = await readDay('data/today.json');
-  const st = document.getElementById('status-today');
-  if(!tRes.ok){
-    st.innerHTML = `<span class="err">Kunde inte läsa data/today.json (${tRes.status||tRes.error||'okänt fel'})</span>`;
-  }else{
-    document.getElementById('mean-today').textContent = `${tRes.mean.toFixed(1)} öre/kWh`;
-    const best = findBest5(tRes.hoursISO, tRes.pricesOre);
-    document.getElementById('best-today').textContent = best ? `${best.text} · snitt ${best.avg.toFixed(1)} öre` : '–';
-    render('todayChart', tRes.hoursISO, tRes.pricesOre, tRes.mean);
-    st.textContent = `Laddade 24 timmar för idag.`;
+  let useToday = tRes.ok ? tRes : null;
+
+  // Midnattsswitch: om today.json inte gäller dagens datum → använd tomorrow.json som “Idag”
+  const localTodayYMD = localYMD();
+  if (useToday && tRes.hoursISO?.[0] && dateISOtoYMD(tRes.hoursISO[0]) !== localTodayYMD) {
+    const tr2 = await readDay('data/tomorrow.json');
+    if (tr2.ok && tr2.hoursISO?.[0] && dateISOtoYMD(tr2.hoursISO[0]) === localTodayYMD) {
+      useToday = tr2; // visa imorgon-filen som "Idag" efter midnatt
+      // Dölj Imorgon-sektionen i så fall — den kommer tillbaka när ny morgondag släpps 14:30
+      const sec = document.getElementById('tomorrowSection');
+      if (sec) sec.style.display = 'none';
+    }
   }
 
-  // IMORGON (valfritt)
+  const st = document.getElementById('status-today');
+  if(!useToday){
+    st.innerHTML = `<span class="err">Kunde inte läsa data/today.json</span>`;
+  }else{
+    document.getElementById('mean-today').textContent = `${useToday.mean.toFixed(1)} öre/kWh`;
+    const best = findBest5(useToday.hoursISO, useToday.pricesOre);
+    document.getElementById('best-today').textContent = best ? `${best.text} · snitt ${best.avg.toFixed(1)} öre` : '–';
+    render('todayChart', useToday.hoursISO, useToday.pricesOre, useToday.mean);
+    st.textContent = 'Laddade 24 timmar för idag.';
+  }
+
+  // Försök rendera Imorgon (om filen finns och inte redan används som “Idag”)
   const tr = await fetch('data/tomorrow.json?t='+Date.now(), {cache:'no-store'});
   if(tr.ok){
     const data = await tr.json();
     if(Array.isArray(data) && data.length === 24){
-      // normalisera
       const hoursISO = data.map(x=>x.time_start);
+      // om vi redan använde tomorrow som “Idag”, hoppa över
+      if (useToday && hoursISO[0] && dateISOtoYMD(hoursISO[0]) === dateISOtoYMD(useToday.hoursISO[0])) {
+        return;
+      }
       const pricesOre = data.map(x=>Math.round(Number(x.SEK_per_kWh)*10000)/100);
       const mean = pricesOre.reduce((a,b)=>a+b,0)/pricesOre.length;
 
@@ -149,10 +191,9 @@ function render(canvasId, hoursISO, prices, mean){
       render('tomorrowChart', hoursISO, pricesOre, mean);
       document.getElementById('status-tomorrow').textContent = 'Laddade 24 timmar för imorgon.';
     }
-  } else {
-    // inget imorgon ännu – vi lämnar sektionen dold
   }
-})();
+}
+init();
 </script>
 </body>
 </html>
