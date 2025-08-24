@@ -126,8 +126,16 @@ function render(canvasId, hoursISO, prices, mean){
       labels,
       datasets: [
         { label:'öre/kWh', data: prices, backgroundColor: colors },
-        { label:'Snitt', type:'line', data: new Array(prices.length).fill(mean),
-          borderColor:'rgba(250,204,21,1)', borderWidth:2, pointRadius:0, fill:false }
+        { 
+  label:'Snitt', 
+  type:'line', 
+  data: new Array(prices.length).fill(mean),
+  borderColor: '#22d3ee',     // cyan
+  borderWidth: 2, 
+  pointRadius: 0, 
+  fill: false,
+  borderDash: [6,4]           // gör linjen streckad (valfritt)
+}
       ]
     },
     options: {
