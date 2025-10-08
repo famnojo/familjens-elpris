@@ -1,118 +1,147 @@
-- name: Hämta och skriv today.json & tomorrow.json (robust)
-  run: |
-    python - <<'PY'
-    import json, datetime as dt, requests, sys
-    from zoneinfo import ZoneInfo
-    from pathlib import Path
-    from collections import defaultdict
+name: Uppdatera elpriser (SE3) 14:30 + 00:10
 
-    ZONE = "SE3"
-    BASE = "https://www.elprisetjustnu.se/api/v1/prices"
+on:
+  schedule:
+    - cron: "30 12 * * *"   # 14:30 Europe/Stockholm (UTC+2 sommartid)
+    - cron: "10 22 * * *"   # 00:10 Europe/Stockholm (22:10 UTC föregående dag)
+  workflow_dispatch:
 
-    tz_se = ZoneInfo("Europe/Stockholm")
-    now_se = dt.datetime.now(tz_se)
-    today = now_se.date()
-    wanted_tomorrow = today + dt.timedelta(days=1)
+permissions:
+  contents: write
 
-    def fetch_raw(day):
-      """Hämtar rålista (oavsett 24 eller 96 punkter) för specificerad dag."""
-      url = f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json"
-      print(f"⇒ Hämtar: {url}")
-      r = requests.get(url, timeout=30)
-      if r.status_code == 404:
-        print("   404 – ingen data ännu")
-        return None
-      r.raise_for_status()
-      data = r.json()
-      print(f"   Antal poster (rå): {len(data)}")
-      return data
+jobs:
+  fetch-data:
+    runs-on: ubuntu-latest
 
-    def to_hourly_average(data):
-      """
-      Tar emot lista med poster innehållande minst:
-        - time_start (ISO)
-        - SEK_per_kWh (str/float)
-      Returnerar exakt 24 poster (timmedel).
-      Fungerar oavsett om input har 24 (tim) eller 96 (kvart) punkter.
-      """
-      # Gruppera på hel timme i svensk tid
-      buckets = defaultdict(list)
+    steps:
+      - name: Checka ut repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
-      for it in data:
-        # Läsa tid som "aware" (har offset). API:ets time_start är ISO med offset.
-        ts = dt.datetime.fromisoformat(it["time_start"].replace("Z", "+00:00"))
-        # Flytta till svensk tid och runda ner till hel timme
-        ts_se = ts.astimezone(tz_se)
-        hour_start = ts_se.replace(minute=0, second=0, microsecond=0)
-        buckets[hour_start].append(float(it["SEK_per_kWh"]))
+      - name: Sätt upp Python + requests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip requests
 
-      # Bygg 24 timmar för dygnet (00:00–23:00) i svensk tid
-      day_start = dt.datetime.fromisoformat(data[0]["time_start"].replace("Z", "+00:00")).astimezone(tz_se).replace(hour=0, minute=0, second=0, microsecond=0)
-      hours = [day_start + dt.timedelta(hours=h) for h in range(24)]
+      - name: Skapa data-mapp
+        run: mkdir -p data
 
-      out = []
-      for h in hours:
-        vals = buckets.get(h, [])
-        if not vals:
-          # Om data saknas för timmen: markera som None eller försök extrapolera.
-          # Vi väljer att använda medel av kända grannar om möjligt, annars None.
-          # Men för att inte krascha diagram använder vi 0.0 som sista utväg.
-          print(f"   VARNING: saknar värden för {h.isoformat()}. Sätter 0.0.")
-          avg = 0.0
-        else:
-          avg = sum(vals) / len(vals)
-        out.append({
-          "time_start": h.isoformat(),        # Ex: 2025-10-08T13:00:00+02:00
-          "SEK_per_kWh": round(avg, 6)        # avrundar lite snyggt
-        })
-      return out
+      - name: Hämta och skriv today.json & tomorrow.json (robust)
+        run: |
+          python - <<'PY'
+          import json, datetime as dt, requests, sys
+          from zoneinfo import ZoneInfo
+          from pathlib import Path
+          from collections import defaultdict
 
-    def build_day(day):
-      raw = fetch_raw(day)
-      if not raw:
-        return None
-      # Normalisera till 24 timposter via timmedel
-      hourly = to_hourly_average(raw)
-      print(f"   Byggde {len(hourly)} timposter.")
-      return hourly
+          ZONE = "SE3"
+          BASE = "https://www.elprisetjustnu.se/api/v1/prices"
 
-    def file_date_first_entry(path: Path):
-      try:
-        arr = json.loads(path.read_text(encoding="utf-8"))
-        if not arr: return None
-        return arr[0]["time_start"][:10]
-      except Exception:
-        return None
+          tz_se = ZoneInfo("Europe/Stockholm")
+          now_se = dt.datetime.now(tz_se)
+          today = now_se.date()
+          wanted_tomorrow = today + dt.timedelta(days=1)
 
-    Path("data").mkdir(exist_ok=True)
+          def fetch_raw(day):
+            """Hämtar rålista (oavsett 24 eller 96 punkter) för specificerad dag."""
+            url = f"{BASE}/{day:%Y}/{day:%m}-{day:%d}_{ZONE}.json"
+            print(f"⇒ Hämtar: {url}")
+            r = requests.get(url, timeout=30)
+            if r.status_code == 404:
+              print("   404 – ingen data ännu")
+              return None
+            r.raise_for_status()
+            data = r.json()
+            print(f"   Antal poster (rå): {len(data)}")
+            return data
 
-    # 1) IDAG (måste finnas)
-    today_list = build_day(today)
-    if not today_list or len(today_list) != 24:
-      print("FEL: Kunde inte bygga 24 timposter för idag – avbryter.", file=sys.stderr)
-      sys.exit(1)
-    Path("data/today.json").write_text(json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("   Skrev data/today.json")
+          def to_hourly_average(data):
+            """
+            Tar emot lista med poster innehållande minst:
+              - time_start (ISO)
+              - SEK_per_kWh (str/float)
+            Returnerar exakt 24 poster (timmedel).
+            Fungerar oavsett om input har 24 (tim) eller 96 (kvart) punkter.
+            """
+            buckets = defaultdict(list)
+            for it in data:
+              ts = dt.datetime.fromisoformat(it["time_start"].replace("Z", "+00:00"))
+              ts_se = ts.astimezone(tz_se)
+              hour_start = ts_se.replace(minute=0, second=0, microsecond=0)
+              buckets[hour_start].append(float(it["SEK_per_kWh"]))
 
-    # 2) IMORGON (om publicerat). Efter midnatt får denna saknas.
-    tomorrow_list = build_day(wanted_tomorrow)
-    p = Path("data/tomorrow.json")
-    if tomorrow_list and len(tomorrow_list) == 24:
-      first_date = tomorrow_list[0]["time_start"][:10]
-      if first_date == f"{wanted_tomorrow:%Y-%m-%d}":
-        p.write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("   Skrev data/tomorrow.json")
-      else:
-        print(f"   Avbryter skrivning: tomorrow.json första datum {first_date} != {wanted_tomorrow:%Y-%m-%d}")
-    else:
-      # om ingen morgondag publicerad: ta bort gammal tomorrow.json om den avser fel datum
-      if p.exists():
-        existing = file_date_first_entry(p)
-        if existing != f"{wanted_tomorrow:%Y-%m-%d}":
-          print("   Tar bort inaktuell data/tomorrow.json (fel datum).")
-          p.unlink()
-        else:
-          print("   Behåller befintlig tomorrow.json som redan gäller korrekt morgondag.")
-      else:
-        print("   Ingen tomorrow.json att uppdatera.")
-    PY
+            # Bygg 24 timmar (00–23) i svensk tid utifrån dygnets start
+            first_ts = dt.datetime.fromisoformat(data[0]["time_start"].replace("Z", "+00:00")).astimezone(tz_se)
+            day_start = first_ts.replace(hour=0, minute=0, second=0, microsecond=0)
+            hours = [day_start + dt.timedelta(hours=h) for h in range(24)]
+
+            out = []
+            for h in hours:
+              vals = buckets.get(h, [])
+              if not vals:
+                print(f"   VARNING: saknar värden för {h.isoformat()}. Sätter 0.0.")
+                avg = 0.0
+              else:
+                avg = sum(vals) / len(vals)
+              out.append({
+                "time_start": h.isoformat(),     # ex: 2025-10-08T13:00:00+02:00
+                "SEK_per_kWh": round(avg, 6)
+              })
+            return out
+
+          def build_day(day):
+            raw = fetch_raw(day)
+            if not raw:
+              return None
+            hourly = to_hourly_average(raw)
+            print(f"   Byggde {len(hourly)} timposter.")
+            return hourly
+
+          def file_date_first_entry(path: Path):
+            try:
+              arr = json.loads(path.read_text(encoding="utf-8"))
+              if not arr: return None
+              return arr[0]["time_start"][:10]
+            except Exception:
+              return None
+
+          Path("data").mkdir(exist_ok=True)
+
+          # 1) IDAG (måste finnas)
+          today_list = build_day(today)
+          if not today_list or len(today_list) != 24:
+            print("FEL: Kunde inte bygga 24 timposter för idag – avbryter.", file=sys.stderr)
+            sys.exit(1)
+          Path("data/today.json").write_text(json.dumps(today_list, ensure_ascii=False, indent=2), encoding="utf-8")
+          print("   Skrev data/today.json")
+
+          # 2) IMORGON (om publicerat)
+          tomorrow_list = build_day(wanted_tomorrow)
+          p = Path("data/tomorrow.json")
+          if tomorrow_list and len(tomorrow_list) == 24:
+            first_date = tomorrow_list[0]["time_start"][:10]
+            if first_date == f"{wanted_tomorrow:%Y-%m-%d}":
+              p.write_text(json.dumps(tomorrow_list, ensure_ascii=False, indent=2), encoding="utf-8")
+              print("   Skrev data/tomorrow.json")
+            else:
+              print(f"   Avbryter skrivning: tomorrow.json första datum {first_date} != {wanted_tomorrow:%Y-%m-%d}")
+          else:
+            if p.exists():
+              existing = file_date_first_entry(p)
+              if existing != f"{wanted_tomorrow:%Y-%m-%d}":
+                print("   Tar bort inaktuell data/tomorrow.json (fel datum).")
+                p.unlink()
+              else:
+                print("   Behåller befintlig tomorrow.json som redan gäller korrekt morgondag.")
+            else:
+              print("   Ingen tomorrow.json att uppdatera.")
+          PY
+
+      - name: Commit & push ändringar
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto: uppdatera today/tomorrow (SE3)"
+          file_pattern: "data/*.json"
