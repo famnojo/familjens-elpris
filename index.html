@@ -103,7 +103,7 @@ function findBest5(hoursISO, prices){
   return {text: `${fmt(start)} – ${fmt(end)}`, avg: bestAvg};
 }
 
-function render(canvasId, hoursISO, prices, mean){
+function render(canvasId, hoursISO, prices, mean, markCurrentHour=false){
   const now = new Date();
   const labels = hoursISO.map(h => new Date(h).toLocaleTimeString('sv-SE',{timeZone:tz,hour:'2-digit'}));
 
@@ -114,7 +114,7 @@ function render(canvasId, hoursISO, prices, mean){
   // - röd om p >= mean
   const thr = 0.85*mean;
   const colors = prices.map((p,i)=>{
-    if (sameLocalHour(hoursISO[i], now)) return 'rgba(255,255,255,0.95)'; // vit
+    if (markCurrentHour && sameLocalHour(hoursISO[i], now)) return 'rgba(255,255,255,0.95)'; // vit endast idag
     if (p < thr) return 'rgba(34,197,94,0.9)';    // grön
     if (p < mean) return 'rgba(250,204,21,0.9)';  // gul
     return 'rgba(239,68,68,0.9)';                 // röd
@@ -177,7 +177,7 @@ async function init(){
     document.getElementById('mean-today').textContent = `${useToday.mean.toFixed(1)} öre/kWh`;
     const best = findBest5(useToday.hoursISO, useToday.pricesOre);
     document.getElementById('best-today').textContent = best ? `${best.text} · snitt ${best.avg.toFixed(1)} öre` : '–';
-    render('todayChart', useToday.hoursISO, useToday.pricesOre, useToday.mean);
+    render('todayChart', useToday.hoursISO, useToday.pricesOre, useToday.mean, true);
     st.textContent = 'Laddade 24 timmar för idag.';
   }
 
@@ -239,7 +239,7 @@ async function init(){
     document.getElementById('mean-tomorrow').textContent=`${mean.toFixed(1)} öre/kWh`;
     const bestT=findBest5(hoursISO,pricesOre);
     document.getElementById('best-tomorrow').textContent=bestT ? `${bestT.text} · snitt ${bestT.avg.toFixed(1)} öre` : '–';
-    render('tomorrowChart',hoursISO,pricesOre,mean);
+    render('tomorrowChart',hoursISO,pricesOre,mean,false);
     document.getElementById('status-tomorrow').textContent=`Priser för ${wantedISO}, hämtade från ${source}.`;
   }else{
     document.getElementById('tomorrowSection').style.display='block';
