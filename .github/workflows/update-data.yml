@@ -1,9 +1,14 @@
-name: Uppdatera elpriser (SE3) 14:30 + 00:10
+name: Uppdatera elpriser (SE3) automatiskt efter kl 13
 
 on:
   schedule:
-    - cron: "30 12 * * *"   # 14:30 Europe/Stockholm (UTC+2 sommartid)
-    - cron: "10 22 * * *"   # 00:10 Europe/Stockholm (22:10 UTC föregående dag)
+    # Kontrollera morgondagens priser var tionde minut, svensk lokal tid.
+    # Flera körningar minskar risken för att GitHub-förseningar gör att priserna uteblir.
+    - cron: "5,15,25,35,45,55 13-18 * * *"
+      timezone: "Europe/Stockholm"
+    # Uppdatera dagens priser vid midnatt samt en extra gång tidigt på morgonen.
+    - cron: "13 0,6 * * *"
+      timezone: "Europe/Stockholm"
   workflow_dispatch:
 
 permissions:
