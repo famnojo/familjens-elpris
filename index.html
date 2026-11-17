@@ -178,26 +178,70 @@ async function init(){
     st.textContent = 'Laddade 24 timmar för idag.';
   }
 
-  // Försök rendera Imorgon (om filen finns och inte redan används som “Idag”)
-  const tr = await fetch('data/tomorrow.json?t='+Date.now(), {cache:'no-store'});
-  if(tr.ok){
-    const data = await tr.json();
-    if(Array.isArray(data) && data.length === 24){
-      const hoursISO = data.map(x=>x.time_start);
-      // om vi redan använde tomorrow som “Idag”, hoppa över
-      if (useToday && hoursISO[0] && dateISOtoYMD(hoursISO[0]) === dateISOtoYMD(useToday.hoursISO[0])) {
-        return;
-      }
-      const pricesOre = data.map(x=>Math.round(Number(x.SEK_per_kWh)*10000)/100);
-      const mean = pricesOre.reduce((a,b)=>a+b,0)/pricesOre.length;
+  // Morgondagen: använd GitHubs sparade fil om datumet stämmer.
+  // Om GitHub är försenat, hämta direkt från elprisleverantören.
+  const tomorrowDate = new Date();
+  const stockholmDateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone:tz, year:'numeric',month:'2-digit',day:'2-digit'
+  }).formatToParts(tomorrowDate);
+  const part = type => stockholmDateParts.find(p=>p.type===type).value;
+  const dateUTC = new Date(Date.UTC(Number(part('year')),Number(part('month'))-1,Number(part('day'))+1));
+  const wantedISO = dateUTC.toISOString().slice(0,10);
 
-      document.getElementById('tomorrowSection').style.display = 'block';
-      document.getElementById('mean-tomorrow').textContent = `${mean.toFixed(1)} öre/kWh`;
-      const bestT = findBest5(hoursISO, pricesOre);
-      document.getElementById('best-tomorrow').textContent = bestT ? `${bestT.text} · snitt ${bestT.avg.toFixed(1)} öre` : '–';
-      render('tomorrowChart', hoursISO, pricesOre, mean);
-      document.getElementById('status-tomorrow').textContent = 'Laddade 24 timmar för imorgon.';
+  let tomorrowData = null;
+  let source = 'GitHub';
+  try {
+    const tr = await fetch('data/tomorrow.json?t='+Date.now(), {cache:'no-store'});
+    if(tr.ok){
+      const arr = await tr.json();
+      if(Array.isArray(arr) && arr.length===24 && arr[0]?.time_start?.slice(0,10)===wantedISO){
+        tomorrowData = arr;
+      }
     }
+  }catch(e){ console.warn('Ingen giltig sparad morgondag:', e); }
+
+  if(!tomorrowData){
+    const url = `https://www.elprisetjustnu.se/api/v1/prices/${wantedISO.slice(0,4)}/${wantedISO.slice(5,7)}-${wantedISO.slice(8,10)}_SE3.json`;
+    try {
+      const response = await fetch(url, {cache:'no-store'});
+      if(response.ok){
+        const raw = await response.json();
+        // Stöd både timpriser och de nya kvartstimmarna.
+        const buckets = new Map();
+        for(const entry of raw){
+          const hour = new Date(entry.time_start).toLocaleString('sv-SE',{
+            timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'
+          });
+          if(!buckets.has(hour)) buckets.set(hour,[]);
+          buckets.get(hour).push({ts:entry.time_start, price:Number(entry.SEK_per_kWh)});
+        }
+        const averaged = [...buckets.values()].map(entries=>({
+          time_start:entries[0].ts,
+          SEK_per_kWh:entries.reduce((sum,e)=>sum+e.price,0)/entries.length
+        }));
+        if(averaged.length===24 && averaged[0].time_start.slice(0,10)===wantedISO &&
+           averaged.every(x=>Number.isFinite(x.SEK_per_kWh))) {
+          tomorrowData = averaged;
+          source = 'elprisleverantören direkt';
+        }
+      }
+    }catch(e){ console.warn('Direkthämtning av morgondagens priser misslyckades:',e); }
+  }
+
+  if(tomorrowData){
+    const hoursISO = tomorrowData.map(x=>x.time_start);
+    const pricesOre = tomorrowData.map(x=>Math.round(Number(x.SEK_per_kWh)*10000)/100);
+    const mean = pricesOre.reduce((a,b)=>a+b,0)/pricesOre.length;
+    document.getElementById('tomorrowSection').style.display='block';
+    document.getElementById('mean-tomorrow').textContent=`${mean.toFixed(1)} öre/kWh`;
+    const bestT=findBest5(hoursISO,pricesOre);
+    document.getElementById('best-tomorrow').textContent=bestT ? `${bestT.text} · snitt ${bestT.avg.toFixed(1)} öre` : '–';
+    render('tomorrowChart',hoursISO,pricesOre,mean);
+    document.getElementById('status-tomorrow').textContent=`Priser för ${wantedISO}, hämtade från ${source}.`;
+  }else{
+    document.getElementById('tomorrowSection').style.display='block';
+    document.getElementById('status-tomorrow').textContent=
+      'Morgondagens priser har inte kunnat hämtas ännu. Försök uppdatera sidan om några minuter.';
   }
 }
 init();
