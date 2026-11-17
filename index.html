@@ -67,7 +67,10 @@ function dateISOtoYMD(iso){
 }
 function sameLocalHour(aISO, bDate){
   const a = new Date(aISO);
-  const fmt = (d)=> new Intl.DateTimeFormat('sv-SE',{timeZone:tz,hour:'2-digit'}).format(d);
+  // Jämför både datum och timme: morgondagens samma klockslag är inte aktuellt ännu.
+  const fmt = (d)=> new Intl.DateTimeFormat('sv-SE',{
+    timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'
+  }).format(d);
   return fmt(a) === fmt(bDate);
 }
 
